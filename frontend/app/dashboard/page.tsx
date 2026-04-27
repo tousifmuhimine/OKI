@@ -1,319 +1,455 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  Calendar, Settings, Maximize2, Plus, RefreshCw, X,
+  ChevronRight, Target, CheckSquare, MoreHorizontal,
+  Clock, TrendingUp, Info, Users, ChevronDown, Zap,
+  Activity, ArrowUpRight, Flame, Circle,
+} from "lucide-react";
 
 import { ProtectedPage } from "@/components/protected-page";
 import { apiRequest } from "@/lib/api";
 import { Customer, CustomerListResponse, DashboardSummary } from "@/types/crm";
 
+// ─── Static data ─────────────────────────────────────────────────
 const scheduleItems = [
-  { color: "bg-[#1769ff]", title: "Sinai Liberation Day, Egypt", date: "2026-04-25" },
-  { color: "bg-[#1769ff]", title: "Liberation Day, Italy", date: "2026-04-25" },
-  { color: "bg-[#bf8a24]", title: "Sales funnel review", date: "2026-04-26" },
-  { color: "bg-[#1769ff]", title: "King Day, Holland", date: "2026-04-27" },
-  { color: "bg-[#1769ff]", title: "Freedom Day, South Africa", date: "2026-04-27" },
-  { color: "bg-[#ff304d]", title: "Business meetings", date: "2026-04-27" },
-  { color: "bg-[#19a96b]", title: "Customer payment confirmation", date: "2026-04-27" },
+  { color: "bg-brand-500",  title: "Sinai Liberation Day, Egypt",   date: "Apr 25" },
+  { color: "bg-indigo-400", title: "Liberation Day, Italy",         date: "Apr 25" },
+  { color: "bg-amber-400",  title: "Sales funnel review",           date: "Apr 26" },
+  { color: "bg-brand-500",  title: "King Day, Holland",             date: "Apr 27" },
+  { color: "bg-cyan-400",   title: "Freedom Day, South Africa",     date: "Apr 27" },
+  { color: "bg-rose-400",   title: "Business meetings",             date: "Apr 27" },
+  { color: "bg-emerald-400",title: "Customer payment confirmation", date: "Apr 27" },
 ];
 
 const taskTabs = [
-  "All",
-  "Message Replies",
-  "Customer Follow-up",
-  "Data Insights",
-  "Approval",
-  "Copy Trading Collaboration",
-  "Opportunity Follow-up",
+  "All", "Message Replies", "Customer Follow-up",
+  "Data Insights", "Approval", "Copy Trading", "Opportunity Follow-up",
 ];
 
-const goalLabels = [
-  { key: "leads", label: "Number of email marketing contacts" },
-  { key: "orders", label: "Closed order amount" },
-  { key: "opportunities", label: "The amount of the opportunities" },
-  { key: "customers", label: "Number of new business customers" },
-  { key: "products", label: "The number of orders closed" },
-] satisfies Array<{ key: keyof Pick<DashboardSummary, "customers" | "leads" | "opportunities" | "products" | "orders">; label: string }>;
+const goalItems = [
+  { key: "leads",         label: "Email marketing contacts", bar: "from-brand-500 to-indigo-400",  icon: Zap },
+  { key: "orders",        label: "Closed order amount",      bar: "from-amber-400  to-orange-400",  icon: TrendingUp },
+  { key: "opportunities", label: "Opportunities amount",     bar: "from-cyan-400   to-blue-400",    icon: Activity },
+  { key: "customers",     label: "New customers",            bar: "from-emerald-400 to-teal-400",   icon: Users },
+  { key: "products",      label: "Orders closed",            bar: "from-rose-400   to-pink-400",    icon: Target },
+] satisfies Array<{
+  key: keyof Pick<DashboardSummary, "customers"|"leads"|"opportunities"|"products"|"orders">;
+  label: string; bar: string; icon: React.ElementType;
+}>;
 
 function currentTime() {
   return new Intl.DateTimeFormat("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
   }).format(new Date());
 }
 
+// ─── Mini KPI tile ───────────────────────────────────────────────
+function KpiTile({
+  label, value, trend, trendUp = true, icon: Icon, delay = "0ms",
+}: {
+  label: string; value: string | number; trend: string;
+  trendUp?: boolean; icon: React.ElementType; delay?: string;
+}) {
+  return (
+    <div
+      className="glass-card flex flex-col gap-3 p-5 animate-fade-up"
+      style={{ animationDelay: delay }}
+    >
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">
+          {label}
+        </span>
+        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10 text-brand-600 dark:bg-brand-500/20 dark:text-brand-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+          <Icon size={13} />
+        </div>
+      </div>
+      <p className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">{value}</p>
+      <div className="flex items-center gap-1">
+        <ArrowUpRight
+          size={12}
+          className={trendUp ? "text-emerald-500" : "text-rose-400 rotate-90"}
+        />
+        <span className={`text-xs font-medium ${trendUp ? "text-emerald-500" : "text-rose-400"}`}>
+          {trend}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Glass card wrapper ──────────────────────────────────────────
+function BCard({
+  children, className = "", delay = "0ms",
+}: { children: React.ReactNode; className?: string; delay?: string }) {
+  return (
+    <div
+      className={`glass-card animate-fade-up overflow-hidden ${className}`}
+      style={{ animationDelay: delay }}
+    >
+      {children}
+    </div>
+  );
+}
+
+// ─── Card header row ─────────────────────────────────────────────
+function CardHead({
+  title, sub, actions,
+}: { title: React.ReactNode; sub?: string; actions?: React.ReactNode }) {
+  return (
+    <div className="flex items-start justify-between border-b border-white/20 dark:border-white/10 px-5 py-4">
+      <div>
+        <p className="font-semibold text-slate-800 dark:text-slate-100">{title}</p>
+        {sub && <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{sub}</p>}
+      </div>
+      {actions && <div className="flex items-center gap-1">{actions}</div>}
+    </div>
+  );
+}
+
+function IconBtn({ icon: Icon, label }: { icon: React.ElementType; label: string }) {
+  return (
+    <button
+      type="button" aria-label={label}
+      className="flex h-6 w-6 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white/40 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-slate-200"
+    >
+      <Icon size={13} />
+    </button>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Dashboard
+// ═══════════════════════════════════════════════════════════════
 export default function DashboardPage() {
-  const [data, setData] = useState<DashboardSummary | null>(null);
+  const [data, setData]           = useState<DashboardSummary | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [clock, setClock] = useState(currentTime);
+  const [error, setError]         = useState<string | null>(null);
+  const [clock, setClock]         = useState(currentTime);
+  const [activeTab, setActiveTab] = useState(0);
+  const [notice, setNotice]       = useState(true);
 
   useEffect(() => {
-    let active = true;
-
+    let alive = true;
     Promise.all([
       apiRequest<DashboardSummary>("/dashboard/summary"),
       apiRequest<CustomerListResponse>("/customers?limit=8&offset=0"),
-    ])
-      .then(([summary, customerResponse]) => {
-        if (!active) {
-          return;
-        }
-
-        setData(summary);
-        setCustomers(customerResponse.data);
-        setError(null);
-      })
-      .catch((err: Error) => {
-        if (active) {
-          setError(err.message);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
+    ]).then(([summary, cust]) => {
+      if (!alive) return;
+      setData(summary); setCustomers(cust.data); setError(null);
+    }).catch((e: Error) => { if (alive) setError(e.message); });
+    return () => { alive = false; };
   }, []);
 
   useEffect(() => {
-    const interval = window.setInterval(() => setClock(currentTime()), 1000);
-    return () => window.clearInterval(interval);
+    const t = window.setInterval(() => setClock(currentTime()), 1000);
+    return () => window.clearInterval(t);
   }, []);
+
+  const today = new Date().toLocaleDateString("en-US", {
+    weekday: "long", month: "long", day: "numeric", year: "numeric",
+  });
 
   return (
     <ProtectedPage>
-      <section className="min-h-[calc(100vh-54px)] bg-[#f3f5fc] px-7 pb-8 pt-4">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-[22px]">Hi admin</span>
-          </div>
+      <section className="min-h-[calc(100vh-54px)] bg-transparent px-6 pb-10 pt-6">
 
-          <div className="flex flex-wrap items-center gap-5 text-sm text-[#273043]">
-            <span>◷ East 10th District: Sydney</span>
-            <span className="font-mono text-[22px] tracking-[0.2em] text-[#6a5d5d]">{clock}</span>
-            <span>▣ Exchange rate calculator</span>
-            <span>▦ Workbench configuration</span>
+        {/* ── Greeting bar ─────────────────────────────────── */}
+        <div className="mb-5 flex flex-wrap items-end justify-between gap-3 animate-fade-up">
+          <div>
+            <h1 className="text-[22px] font-bold tracking-tight text-slate-900 dark:text-white">
+              Good afternoon, Ji-ho 👋
+            </h1>
+            <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-300 drop-shadow-sm">{today} · Here&apos;s your workspace overview</p>
+          </div>
+          <div className="glass-panel flex items-center gap-3 rounded-2xl px-4 py-2 shadow-[0_8px_32px_rgba(0,0,0,0.1)]">
+            <Clock size={13} className="text-brand-500 dark:text-brand-400" />
+            <span className="text-xs text-slate-600 dark:text-slate-300">Sydney</span>
+            <span className="font-mono text-base font-semibold tabular-nums tracking-widest text-slate-800 dark:text-slate-100">
+              {clock}
+            </span>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_400px]">
-          <div className="space-y-6">
-            <section className="relative h-[286px] overflow-hidden rounded-lg bg-white px-7 py-6 shadow-sm">
-              <div className="absolute right-8 top-7 flex gap-4 text-lg text-slate-500">
-                <button type="button" aria-label="Add schedule item">
-                  ⊕
+        {/* ══════════════════════════════════════════════════
+            GLASS GRID
+        ════════════════════════════════════════════════ */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+
+          {/* ── Schedule (tall left card) ─── lg: col 1-7, rows 1-2 */}
+          <BCard className="lg:col-span-7 lg:row-span-2" delay="60ms">
+            <CardHead
+              title={
+                <span className="flex items-center gap-2">
+                  <Calendar size={14} className="text-brand-500 dark:text-brand-400" />
+                  Schedule
+                  <ChevronRight size={13} className="text-slate-400" />
+                  <span className="inline-flex overflow-hidden rounded-lg border border-white/30 dark:border-white/10 text-[11px] bg-white/20 dark:bg-black/20">
+                    {["week", "month", "List"].map((o, i) => (
+                      <button
+                        key={o} type="button"
+                        className={`h-6 px-2.5 transition ${o === "List"
+                          ? "bg-brand-500 font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]"
+                          : "text-slate-600 dark:text-slate-300 hover:bg-white/40 dark:hover:bg-white/10"
+                        } ${i !== 0 ? "border-l border-white/20 dark:border-white/10" : ""}`}
+                      >{o}</button>
+                    ))}
+                  </span>
+                </span>
+              }
+              actions={
+                <>
+                  <IconBtn icon={Plus}      label="Add" />
+                  <IconBtn icon={Settings}  label="Settings" />
+                  <IconBtn icon={Maximize2} label="Expand" />
+                </>
+              }
+            />
+
+            {/* Notice banner */}
+            {notice && (
+              <div className="mx-5 mt-4 flex items-center gap-2 rounded-xl border border-brand-200/50 bg-brand-50/50 px-4 py-2.5 text-xs dark:border-brand-500/20 dark:bg-brand-500/10 backdrop-blur-md">
+                <Info size={13} className="shrink-0 text-brand-600 dark:text-brand-400" />
+                <span className="flex-1 text-slate-700 dark:text-slate-200">3 new follow-up tasks added</span>
+                <button type="button" className="font-semibold text-brand-600 hover:underline dark:text-brand-400">
+                  Click to refresh
                 </button>
-                <button type="button" aria-label="Schedule settings">
-                  ⚙
-                </button>
-                <button type="button" aria-label="Expand schedule">
-                  ⤢
+                <button type="button" aria-label="Dismiss" onClick={() => setNotice(false)}
+                  className="ml-1 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200">
+                  <X size={13} />
                 </button>
               </div>
+            )}
 
-              <div className="mb-4 flex items-center gap-4">
-                <h1 className="text-xl font-semibold">Schedule</h1>
-                <span className="text-lg text-slate-500">›</span>
-                <div className="flex overflow-hidden rounded border border-[#b9c3d8] text-sm">
-                  {["week", "month", "List"].map((label) => (
-                    <button
-                      key={label}
-                      className={`h-7 px-3 ${label === "List" ? "border-l border-[#1769ff] text-[#005cff]" : "border-r border-[#d8deea]"}`}
-                      type="button"
-                    >
-                      {label}
-                    </button>
-                  ))}
+            <div className="px-5 py-3 space-y-0.5">
+              {scheduleItems.map((item) => (
+                <div
+                  key={item.title}
+                  className="group flex items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-white/40 dark:hover:bg-white/5"
+                >
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${item.color} shadow-[0_0_8px_currentColor]`} />
+                  <span className="flex-1 truncate text-sm text-slate-800 dark:text-slate-200">{item.title}</span>
+                  <span className="shrink-0 rounded-lg bg-white/50 border border-white/20 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-black/20 dark:border-white/5 dark:text-slate-400">
+                    {item.date}
+                  </span>
                 </div>
-              </div>
+              ))}
+            </div>
+          </BCard>
 
-              <div className="space-y-3 pr-8">
-                {scheduleItems.map((item) => (
-                  <div key={`${item.title}-${item.date}`} className="grid grid-cols-[16px_minmax(0,1fr)_92px] items-center gap-1 text-sm">
-                    <span className={`h-2 w-2 rounded-full ${item.color}`} />
-                    <span className="truncate">{item.title}</span>
-                    <span className="text-right text-[#005bd8]">{item.date}</span>
-                  </div>
-                ))}
-              </div>
+          {/* ── KPI mini tiles (2×2 grid) ── lg: col 8-12, rows 1-2 */}
+          <div className="grid grid-cols-2 gap-4 lg:col-span-5 lg:row-span-2 lg:content-start">
+            <KpiTile icon={Target}      label="Goal Completion" value={`${data?.customers ?? 0}%`} trend="+4.2% vs last month" delay="80ms" />
+            <KpiTile icon={CheckSquare} label="Tasks Done"      value={data?.orders ?? 0}          trend="+12 this week"       delay="120ms" />
+            <KpiTile icon={Flame}       label="Opportunities"   value={data?.opportunities ?? 0}   trend="+3 recycled today"   delay="160ms" />
+            <KpiTile icon={Users}       label="Customers"       value={data?.customers ?? 0}        trend="+2 this month"      delay="200ms" />
+          </div>
 
-              <div className="absolute left-1/2 top-8 -translate-x-1/2 rounded border border-[#2f72ff] bg-[#f8fbff] px-4 py-3 text-sm shadow-sm">
-                <span className="mr-3 text-[#1769ff]">i</span>
-                <span className="mr-3">3 new follow-up tasks</span>
-                <button className="mr-2 text-[#005cff]" type="button">
-                  Click Refresh
+          {/* ── Follow-up tasks ── lg: col 1-7, rows 3-4 */}
+          <BCard className="lg:col-span-7 lg:row-span-2" delay="100ms">
+            <CardHead
+              title="Follow up on tasks"
+              sub="AI-recommended tasks based on your pipeline activity"
+              actions={
+                <button type="button" className="flex items-center gap-1.5 rounded-xl border border-white/30 bg-white/20 dark:border-white/10 dark:bg-white/5 px-3 py-1.5 text-[11px] font-medium text-slate-600 dark:text-slate-300 transition hover:bg-white/40 dark:hover:bg-white/10">
+                  <Settings size={11} /> Display settings
                 </button>
-                <button className="text-xl leading-none text-slate-600" type="button" aria-label="Dismiss notification">
-                  ×
-                </button>
-              </div>
-            </section>
+              }
+            />
 
-            <section className="rounded-lg bg-[linear-gradient(135deg,#eaf7ff_0%,#f7f5ff_60%,#eef0ff_100%)] px-7 py-6 shadow-sm">
-              <div className="mb-4 flex items-start justify-between gap-4">
-                <div>
-                  <h2 className="text-xl font-semibold">Follow up on tasks</h2>
-                  <p className="mt-3 text-sm">
-                    Based on AI analysis and manager configuration, the following follow-up tasks are recommended for you.
-                    Act now to continue to improve your performance!
-                  </p>
-                </div>
-                <button className="text-sm text-slate-600" type="button">
-                  ⚙ Display settings
-                </button>
-              </div>
-
-              <div className="mb-5 flex flex-wrap gap-2">
-                {taskTabs.map((tab, index) => {
-                  const count = index === 0 || index === 2 ? customers.length : 0;
-                  return (
+            {/* Tabs */}
+            <div className="flex flex-wrap gap-2 px-5 pt-4 pb-3">
+              {taskTabs.map((tab, i) => {
+                const count = i === 0 || i === 2 ? customers.length : 0;
+                return (
                   <button
-                    key={tab}
-                    className={`h-9 rounded-md border px-4 text-sm ${
-                      index === 0 ? "border-[#c9d2ff] bg-[#f5f7ff] text-[#4425ff]" : "border-white bg-white text-slate-600"
+                    key={tab} type="button"
+                    onClick={() => setActiveTab(i)}
+                    className={`h-7 rounded-lg border px-3 text-[11px] font-medium transition ${
+                      activeTab === i
+                        ? "border-brand-300/50 bg-brand-500/20 text-brand-800 dark:border-brand-400/30 dark:bg-brand-500/20 dark:text-brand-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]"
+                        : "border-white/30 bg-white/20 text-slate-600 hover:bg-white/40 dark:border-white/10 dark:bg-white/5 dark:text-slate-400 dark:hover:bg-white/10"
                     }`}
-                    type="button"
                   >
                     {tab} ({count})
                   </button>
-                  );
-                })}
+                );
+              })}
+            </div>
+
+            {/* Table */}
+            <div className="overflow-hidden rounded-xl border border-white/20 mx-5 mb-5 dark:border-white/10 bg-white/10 dark:bg-black/10">
+              <div className="flex items-center justify-between border-b border-white/20 bg-white/20 px-4 py-2.5 dark:border-white/10 dark:bg-white/5">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">Customers</span>
+                  <span className="rounded-md bg-white/40 border border-white/20 px-1.5 py-0.5 text-[10px] text-slate-600 dark:bg-white/10 dark:border-white/5 dark:text-slate-400">
+                    Suspected Failed Mailboxes (99+)
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400">
+                  <button type="button" className="hover:text-slate-800 dark:hover:text-slate-200 transition">Ignore all</button>
+                  <button type="button" aria-label="More"><MoreHorizontal size={13} /></button>
+                </div>
               </div>
 
-              <div className="rounded-lg bg-white p-5 shadow-sm">
-                <div className="mb-4 flex items-center justify-between border-b border-slate-100 pb-4">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-semibold">customers</h3>
-                    <span className="text-sm text-slate-500">Suspected Failed Mailboxes (99+) ›</span>
-                    <span className="text-xs text-slate-400">?</span>
-                  </div>
-                  <div className="flex items-center gap-4 text-sm text-slate-500">
-                    <button type="button">Ignore them all</button>
-                    <button className="text-lg leading-none" type="button" aria-label="More task actions">
-                      ⋮
-                    </button>
-                  </div>
-                </div>
+              {error && (
+                <p className="px-4 py-2 text-xs text-rose-600 dark:text-rose-400 bg-rose-50/50 dark:bg-rose-500/10 backdrop-blur-md">{error}</p>
+              )}
 
-                {error ? <p className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
-
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr className="bg-[#fafafa] text-left text-xs font-semibold text-[#111827]">
-                        <th className="px-3 py-4">Company name</th>
-                        <th className="px-3 py-4">nickname</th>
-                        <th className="px-3 py-4">Invalid mailboxes</th>
-                        <th className="px-3 py-4 text-right">operation</th>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      <th className="px-4 py-3">Company</th>
+                      <th className="px-4 py-3">Nickname</th>
+                      <th className="px-4 py-3">Invalid mailboxes</th>
+                      <th className="px-4 py-3 text-right">Operation</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/20 dark:divide-white/10">
+                    {customers.map((row) => (
+                      <tr key={row.id} className="group transition hover:bg-white/40 dark:hover:bg-white/10">
+                        <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">{row.company_name}</td>
+                        <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{row.contact_person ?? "info"}</td>
+                        <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{row.country_region ?? "mailbox pending"}</td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex items-center justify-end gap-2 text-[11px] text-brand-600 dark:text-brand-400 opacity-0 transition group-hover:opacity-100">
+                            <button type="button" className="hover:underline drop-shadow-sm">Disable</button>
+                            <span className="text-slate-300 dark:text-slate-600">|</span>
+                            <button type="button" className="hover:underline drop-shadow-sm">Delete mailbox</button>
+                            <span className="text-slate-300 dark:text-slate-600">|</span>
+                            <button type="button" className="hover:underline drop-shadow-sm">Ignore</button>
+                          </div>
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {customers.map((row) => (
-                        <tr key={row.id} className="h-[68px]">
-                          <td className="px-3 py-3">{row.company_name}</td>
-                          <td className="px-3 py-3">{row.contact_person ?? "info"}</td>
-                          <td className="px-3 py-3">{row.country_region ?? "mailbox pending"}</td>
-                          <td className="px-3 py-3 text-right text-[#005cff]">
-                            <button className="px-2" type="button">
-                              Disable contacts
-                            </button>
-                            <span className="text-slate-300">|</span>
-                            <button className="px-2" type="button">
-                              Delete the mailbox
-                            </button>
-                            <span className="text-slate-300">|</span>
-                            <button className="px-2" type="button">
-                              ignore
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                      {customers.length === 0 ? (
-                        <tr>
-                          <td className="px-3 py-8 text-center text-sm text-slate-500" colSpan={4}>
-                            No customer follow-up data available.
-                          </td>
-                        </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
-                </div>
+                    ))}
+                    {customers.length === 0 && (
+                      <tr>
+                        <td className="px-4 py-10 text-center text-sm text-slate-500 dark:text-slate-400" colSpan={4}>
+                          No customer follow-up data available.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
-            </section>
-          </div>
+            </div>
+          </BCard>
 
-          <aside className="space-y-6">
-            <section className="rounded-lg bg-white p-6 shadow-sm">
-              <div className="mb-5 flex items-center justify-between">
-                <h2 className="text-xl font-semibold">Goal completion</h2>
-                <div className="flex items-center gap-4 text-sm text-slate-600">
-                  <span>My Enterp...</span>
-                  <button type="button" aria-label="Goal settings">
-                    ⚙
-                  </button>
-                </div>
-              </div>
+          {/* ── Goal completion ── lg: col 8-12, rows 3-4 */}
+          <BCard className="lg:col-span-5" delay="140ms">
+            <CardHead
+              title={
+                <span className="flex items-center gap-2">
+                  <Activity size={14} className="text-brand-500 dark:text-brand-400" />
+                  Goal Completion
+                </span>
+              }
+              actions={<IconBtn icon={Settings} label="Settings" />}
+            />
 
-              <div className="mb-4 flex">
-                <button className="h-8 border border-[#1769ff] px-3 text-sm text-[#005cff]" type="button">
+            <div className="px-5 py-4">
+              {/* Toggle */}
+              <div className="mb-5 flex overflow-hidden rounded-xl border border-white/30 dark:border-white/10 text-xs bg-white/20 dark:bg-white/5">
+                <button type="button" className="flex-1 border-r border-white/30 dark:border-white/10 bg-brand-500 py-2 font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]">
                   Outcome Objectives
                 </button>
-                <button className="h-8 border border-l-0 border-slate-300 px-3 text-sm" type="button">
+                <button type="button" className="flex-1 py-2 text-slate-600 dark:text-slate-300 transition hover:bg-white/40 dark:hover:bg-white/10">
                   Process objectives
                 </button>
               </div>
 
-              <div className="space-y-5">
-                {goalLabels.map((goal) => {
-                  const value = data ? data[goal.key] : 0;
-                  const width = Math.min(100, value * 10);
-
+              <div className="space-y-4">
+                {goalItems.map((g) => {
+                  const val   = data ? data[g.key] : 0;
+                  const width = Math.min(100, val * 10);
+                  const Icon  = g.icon;
                   return (
-                    <div key={goal.key}>
-                      <div className="mb-2 flex items-center justify-between text-sm">
-                        <span className="max-w-[250px] truncate">{goal.label} › ⓘ</span>
-                        <span>{goal.key === "orders" || goal.key === "opportunities" ? `¥${value}` : value}</span>
+                    <div key={g.key}>
+                      <div className="mb-1.5 flex items-center justify-between text-xs">
+                        <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
+                          <Icon size={11} className="text-slate-500 dark:text-slate-400" />
+                          {g.label}
+                        </span>
+                        <span className="font-semibold text-slate-800 dark:text-slate-200">
+                          {g.key === "orders" || g.key === "opportunities" ? `¥${val}` : val}
+                        </span>
                       </div>
-                      <div className="h-2 overflow-hidden rounded bg-[#eeeeef]">
-                        <div className="h-full bg-[#1769ff]" style={{ width: `${width}%` }} />
+                      <div className="h-1.5 overflow-hidden rounded-full bg-white/30 border border-white/20 dark:bg-black/30 dark:border-white/5">
+                        <div
+                          className={`h-full rounded-full bg-gradient-to-r ${g.bar} transition-all duration-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.4)]`}
+                          style={{ width: `${width}%` }}
+                        />
                       </div>
-                      <p className="mt-2 text-xs text-slate-500">
-                        No target value is set <button className="ml-2 text-[#005cff]" type="button">Set it up now</button>
+                      <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                        No target set{" "}
+                        <button type="button" className="text-brand-600 hover:underline dark:text-brand-400">Set it up now</button>
                       </p>
                     </div>
                   );
                 })}
               </div>
-            </section>
+            </div>
+          </BCard>
 
-            <section className="rounded-lg bg-white p-6 shadow-sm">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-xl font-semibold">Task completion</h2>
-                <div className="flex items-center gap-3 text-sm text-slate-600">
-                  <span>Today⌄</span>
-                  <span className="rounded bg-slate-100 px-3 py-1">admin ×</span>
-                  <span>⌄</span>
-                </div>
-              </div>
+          {/* ── Task completion ── lg: col 8-12, row 5 */}
+          <BCard className="lg:col-span-5" delay="180ms">
+            <CardHead
+              title={
+                <span className="flex items-center gap-2">
+                  <CheckSquare size={14} className="text-brand-500 dark:text-brand-400" />
+                  Task Completion
+                </span>
+              }
+              actions={
+                <>
+                  <button type="button" className="flex items-center gap-1 rounded-lg border border-white/30 bg-white/20 px-2.5 py-1 text-[11px] text-slate-600 hover:bg-white/40 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10 transition">
+                    Today <ChevronDown size={10} />
+                  </button>
+                  <span className="flex items-center gap-1 rounded-lg bg-white/40 border border-white/20 px-2.5 py-1 text-[11px] font-medium text-slate-700 dark:bg-white/10 dark:border-white/5 dark:text-slate-300">
+                    admin <X size={9} className="cursor-pointer" />
+                  </span>
+                </>
+              }
+            />
 
-              <div className="grid h-[190px] place-items-center">
+            <div className="px-5 py-5">
+              <div className="grid h-[120px] place-items-center">
                 <div className="text-center">
-                  <div className="mx-auto mb-3 h-12 w-16 border-t-8 border-[#e5ebf6] bg-[#dfe6f2]">
-                    <div className="mx-auto mt-3 h-2 w-6 bg-[#1769ff]" />
+                  {/* Mini bar chart placeholder */}
+                  <div className="mx-auto mb-3 flex h-10 items-end justify-center gap-1">
+                    {[20, 45, 30, 60, 25, 50, 35].map((h, i) => (
+                      <div
+                        key={i}
+                        className="w-4 rounded-t-md bg-gradient-to-t from-brand-500/50 to-brand-500/10 border-t border-x border-white/30 dark:from-brand-500/40 dark:to-brand-500/5 dark:border-white/10"
+                        style={{ height: `${h}%` }}
+                      />
+                    ))}
                   </div>
-                  <p className="text-sm">No data available</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">No data available</p>
+                  <button type="button" className="mt-1.5 flex items-center gap-1.5 text-[11px] text-brand-600 hover:underline mx-auto dark:text-brand-400 drop-shadow-sm">
+                    <RefreshCw size={10} /> Refresh data
+                  </button>
                 </div>
               </div>
 
-              <div className="flex flex-wrap gap-4 text-xs">
-                <span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-[#00a76f]" />Completed in time</span>
-                <span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-[#e4a82f]" />Timeout completion</span>
-                <span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-[#d9dbe2]" />Not done</span>
+              <div className="mt-3 flex flex-wrap gap-3 text-[11px] text-slate-500 dark:text-slate-400">
+                {[
+                  { color: "text-emerald-400", label: "Completed in time" },
+                  { color: "text-amber-400",   label: "Timeout completion" },
+                  { color: "text-slate-400 dark:text-slate-600", label: "Not done" },
+                ].map(({ color, label }) => (
+                  <span key={label} className="flex items-center gap-1.5">
+                    <Circle size={7} className={`fill-current ${color}`} />
+                    {label}
+                  </span>
+                ))}
               </div>
-            </section>
-          </aside>
-        </div>
+            </div>
+          </BCard>
+
+        </div>{/* /glass grid */}
       </section>
     </ProtectedPage>
   );

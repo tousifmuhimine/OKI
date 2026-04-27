@@ -2,87 +2,113 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useTheme } from "next-themes";
+import { useEffect, useState } from "react";
+import {
+  LayoutDashboard, Users, Zap, ShoppingCart,
+  Star, Mail, MessageSquare, Lightbulb, TrendingUp,
+  BarChart2, Infinity, Sun, Moon, Search, Bell,
+  LogOut, ChevronDown, Plus, Settings, HelpCircle,
+} from "lucide-react";
 
 import { clearDemoSession, isDemoSessionActive } from "@/lib/demo-auth";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 
 const primaryNav = [
-  { href: "/dashboard", label: "Workbench", icon: "▦", badge: "3" },
-  { href: "/customers", label: "Customers", icon: "◎" },
-  { href: "/leads", label: "OKKI Leads", icon: "◉" },
-  { href: "/orders", label: "Trading", icon: "▤" },
+  { href: "/dashboard", label: "Workbench",  icon: LayoutDashboard, badge: "3" },
+  { href: "/customers", label: "Customers",  icon: Users },
+  { href: "/leads",     label: "OKKI Leads", icon: Zap },
+  { href: "/orders",    label: "Trading",    icon: ShoppingCart },
 ];
 
 const secondaryNav = [
-  { label: "Commonly used", icon: "★" },
-  { label: "Mail", icon: "✉" },
-  { label: "Communication", icon: "▣" },
-  { label: "Clues", icon: "⌘" },
-  { label: "Business opportunities", icon: "◌", dot: true },
-  { label: "Team data", icon: "▥" },
-  { label: "Synergy", icon: "∞" },
+  { label: "Favourites", icon: Star },
+  { label: "Mail",       icon: Mail },
+  { label: "Talk",       icon: MessageSquare },
+  { label: "Leads",      icon: Lightbulb, dot: true },
+  { label: "Pipeline",   icon: TrendingUp },
+  { label: "Team Data",  icon: BarChart2 },
+  { label: "Synergy",    icon: Infinity },
 ];
 
-type AppShellProps = {
-  children: React.ReactNode;
-};
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+  if (!mounted) return <div className="h-8 w-8" />;
+  return (
+    <button
+      id="theme-toggle"
+      aria-label="Toggle theme"
+      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+      className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-500 transition hover:bg-brand-50 hover:text-brand-600 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-brand-300"
+      type="button"
+    >
+      {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+    </button>
+  );
+}
 
-export function AppShell({ children }: AppShellProps) {
+export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const router = useRouter();
-  const isLogin = pathname === "/login";
+  const router   = useRouter();
+  const isLogin  = pathname === "/login";
 
   async function signOut() {
-    if (isDemoSessionActive()) {
-      clearDemoSession();
-      router.push("/login");
-      return;
-    }
-
-    if (!isSupabaseConfigured()) {
-      router.push("/login");
-      return;
-    }
-
+    if (isDemoSessionActive()) { clearDemoSession(); router.push("/login"); return; }
+    if (!isSupabaseConfigured()) { router.push("/login"); return; }
     await getSupabaseClient().auth.signOut();
     router.push("/login");
   }
 
   if (isLogin) {
-    return <main className="min-h-screen bg-[#f4f5fb] px-4 py-6">{children}</main>;
+    return (
+      <main className="min-h-screen bg-transparent px-4 py-6">
+        {children}
+      </main>
+    );
   }
 
   return (
-    <div className="min-h-screen bg-[#f4f5fb] text-[#1f2430]">
-      <aside className="fixed inset-y-0 left-0 z-30 flex w-[92px] flex-col bg-[#101a42] text-white shadow-[4px_0_18px_rgba(10,20,60,0.18)]">
-        <Link href="/dashboard" className="flex h-[54px] items-center justify-center bg-white">
-          <span className="text-[22px] font-bold tracking-[0.12em] text-[#1769ff]">OKKI</span>
+    <div className="min-h-screen bg-transparent text-slate-900 dark:text-slate-100">
+
+      {/* ─── Sidebar ─────────────────────────────────────────── */}
+      <aside className="fixed inset-y-0 left-0 z-30 flex w-[72px] flex-col bg-white/40 dark:bg-slate-900/40 backdrop-blur-2xl border-r border-white/20 dark:border-white/10 shadow-[4px_0_32px_rgba(0,0,0,0.1)] dark:shadow-[4px_0_32px_rgba(0,0,0,0.3)]">
+
+        {/* Logo */}
+        <Link
+          href="/dashboard"
+          id="sidebar-logo"
+          className="group flex h-[54px] items-center justify-center"
+        >
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 shadow-glow-sm transition group-hover:shadow-glow">
+            <span className="text-[13px] font-black tracking-widest text-white">OKI</span>
+          </div>
         </Link>
 
-        <div className="flex-1 space-y-1 overflow-y-auto py-5">
-          {secondaryNav.slice(0, 1).map((item) => (
-            <div key={item.label} className="mb-4 flex flex-col items-center gap-1 text-[11px] text-slate-300">
-              <span className="text-lg text-slate-200">{item.icon}</span>
-              <span>{item.label}</span>
-            </div>
-          ))}
-
-          <div className="mx-3 mb-3 h-px bg-white/15" />
-
+        {/* Primary nav */}
+        <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2 py-3">
           {primaryNav.map((item) => {
             const active = pathname?.startsWith(item.href);
+            const Icon   = item.icon;
             return (
               <Link
                 key={item.href}
+                id={`nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
                 href={item.href}
-                className={`relative mx-2 flex h-[62px] flex-col items-center justify-center gap-1 rounded-md text-[11px] transition ${
-                  active ? "bg-[#1167ff] text-white" : "text-slate-300 hover:bg-white/10 hover:text-white"
+                className={`relative flex flex-col items-center justify-center gap-1 rounded-xl py-3 text-[10px] font-medium transition-all ${
+                  active
+                    ? "bg-brand-500/20 text-brand-700 dark:bg-brand-500/30 dark:text-brand-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
+                    : "text-slate-600 dark:text-slate-400 hover:bg-white/40 dark:hover:bg-white/10 hover:text-slate-900 dark:hover:text-slate-200"
                 }`}
               >
-                <span className="text-[20px] leading-none">{item.icon}</span>
-                <span>{item.label}</span>
+                {active && (
+                  <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full bg-brand-500 dark:bg-brand-400" />
+                )}
+                <Icon size={18} strokeWidth={active ? 2 : 1.7} />
+                <span className="leading-tight">{item.label}</span>
                 {item.badge ? (
-                  <span className="absolute right-5 top-2 rounded-full bg-[#ff314f] px-1.5 text-[10px] font-semibold">
+                  <span className="absolute right-1.5 top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-brand-500 px-1 text-[9px] font-bold text-white shadow-[0_0_10px_rgba(99,102,241,0.5)]">
                     {item.badge}
                   </span>
                 ) : null}
@@ -90,52 +116,100 @@ export function AppShell({ children }: AppShellProps) {
             );
           })}
 
-          {secondaryNav.slice(1).map((item) => (
-            <div
-              key={item.label}
-              className="relative mx-2 flex h-[62px] flex-col items-center justify-center gap-1 rounded-md text-[11px] text-slate-300"
-            >
-              <span className="text-[19px] leading-none">{item.icon}</span>
-              <span className="max-w-[76px] text-center leading-tight">{item.label}</span>
-              {item.dot ? <span className="absolute right-7 top-2 h-2 w-2 rounded-full bg-[#ff314f]" /> : null}
-            </div>
-          ))}
+          <div className="my-2 h-px bg-slate-200/50 dark:bg-white/10" />
+
+          {secondaryNav.slice(1).map((item) => {
+            const Icon = item.icon;
+            return (
+              <div
+                key={item.label}
+                className="relative flex flex-col items-center justify-center gap-1 rounded-xl py-3 text-[10px] text-slate-500 dark:text-slate-400 transition hover:bg-white/40 dark:hover:bg-white/10 hover:text-slate-800 dark:hover:text-slate-300 cursor-pointer"
+              >
+                <Icon size={16} strokeWidth={1.6} />
+                <span className="max-w-[58px] text-center leading-tight">{item.label}</span>
+                {item.dot && <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-brand-500 shadow-[0_0_8px_rgba(99,102,241,0.8)]" />}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Bottom */}
+        <div className="space-y-0.5 border-t border-slate-200/50 dark:border-white/10 px-2 py-3">
+          <div className="flex flex-col items-center gap-1 rounded-xl py-2.5 text-[10px] text-slate-500 dark:text-slate-400 hover:bg-white/40 dark:hover:bg-white/10 hover:text-slate-800 dark:hover:text-slate-300 transition cursor-pointer">
+            <HelpCircle size={16} strokeWidth={1.6} />
+            <span>Help</span>
+          </div>
+          <div className="flex flex-col items-center gap-1 rounded-xl py-2.5 text-[10px] text-slate-500 dark:text-slate-400 hover:bg-white/40 dark:hover:bg-white/10 hover:text-slate-800 dark:hover:text-slate-300 transition cursor-pointer">
+            <Settings size={16} strokeWidth={1.6} />
+            <span>Settings</span>
+          </div>
         </div>
       </aside>
 
-      <header className="fixed left-[92px] right-0 top-0 z-20 flex h-[54px] items-center justify-between border-b border-[#e2e5ef] bg-white px-6">
-        <div className="flex min-w-0 flex-1 items-center">
-          <div className="flex h-8 w-[480px] max-w-full overflow-hidden rounded border border-[#d9deea] bg-white">
-            <button className="w-[100px] border-r border-[#d9deea] text-sm text-slate-500" type="button">
-              Please se...
-            </button>
+      {/* ─── Header ──────────────────────────────────────────── */}
+      <header className="fixed left-[72px] right-0 top-0 z-20 flex h-[54px] items-center justify-between border-b border-white/30 dark:border-white/10 bg-white/40 dark:bg-slate-900/40 px-5 backdrop-blur-xl">
+
+        {/* Search */}
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <div className="flex h-8 w-full max-w-[380px] items-center gap-2 rounded-xl border border-white/50 dark:border-white/10 bg-white/50 dark:bg-black/20 px-3 text-sm text-slate-500 dark:text-slate-400 transition focus-within:border-brand-400 focus-within:bg-white/80 focus-within:ring-2 focus-within:ring-brand-400/20 dark:focus-within:border-brand-500 dark:focus-within:bg-white/10">
+            <Search size={13} className="shrink-0" />
             <input
-              className="min-w-0 flex-1 px-3 text-sm outline-none"
-              placeholder="Please enter your search keyword"
+              id="global-search"
+              className="min-w-0 flex-1 bg-transparent text-sm text-slate-800 dark:text-slate-200 outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500"
+              placeholder="Search customers, deals…"
               type="search"
             />
-            <button className="w-11 text-lg text-slate-500" type="button" aria-label="Search">
-              ⌕
-            </button>
+            <kbd className="hidden shrink-0 rounded-md border border-slate-300/50 bg-white/50 px-1.5 text-[10px] text-slate-400 dark:border-white/10 dark:bg-black/40 sm:block">
+              ⌘K
+            </kbd>
           </div>
         </div>
 
-        <div className="hidden items-center gap-5 text-sm text-[#202532] xl:flex">
-          <span>⊕</span>
-          <span>◷ TM</span>
-          <span>♧ News</span>
-          <span>♫ Customer service</span>
-          <span>? Help</span>
-          <button className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-600" onClick={signOut} type="button">
-            Sign out
+        {/* Right */}
+        <div className="flex items-center gap-1">
+          <button
+            id="header-new-btn"
+            type="button"
+            className="mr-2 flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-brand-500 to-indigo-600 px-3.5 py-1.5 text-sm font-semibold text-white shadow-glow-sm transition hover:from-brand-400 hover:to-indigo-500 active:scale-95"
+          >
+            <Plus size={13} />
+            <span className="hidden sm:inline">New</span>
           </button>
-          <span className="grid h-8 w-8 place-items-center rounded-full bg-[#e8eefc] text-xs font-semibold text-[#1769ff]">
-            AD
-          </span>
+
+          <button
+            id="header-notifications"
+            type="button"
+            aria-label="Notifications"
+            className="relative flex h-8 w-8 items-center justify-center rounded-xl text-slate-500 transition hover:bg-brand-50 hover:text-brand-600 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-brand-300"
+          >
+            <Bell size={15} />
+            <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-brand-500 shadow-[0_0_8px_rgba(99,102,241,0.8)]" />
+          </button>
+
+          <ThemeToggle />
+
+          <button
+            id="header-signout"
+            type="button"
+            aria-label="Sign out"
+            onClick={signOut}
+            className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-500 transition hover:bg-brand-50 hover:text-brand-600 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-brand-300"
+          >
+            <LogOut size={14} />
+          </button>
+
+          <div className="ml-1 flex items-center gap-1.5 rounded-xl px-2 py-1 transition hover:bg-white/50 dark:hover:bg-white/10 cursor-pointer">
+            <div className="grid h-7 w-7 place-items-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 text-[11px] font-bold text-white shadow-glow-sm">
+              AD
+            </div>
+            <span className="hidden text-xs font-medium text-slate-800 dark:text-slate-200 xl:block">Admin</span>
+            <ChevronDown size={11} className="hidden text-slate-500 dark:text-slate-400 xl:block" />
+          </div>
         </div>
       </header>
 
-      <main className="min-h-screen pl-[92px] pt-[54px]">{children}</main>
+      {/* ─── Main ────────────────────────────────────────────── */}
+      <main className="min-h-screen pl-[72px] pt-[54px]">{children}</main>
     </div>
   );
 }
