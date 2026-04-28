@@ -11,7 +11,7 @@ import {
   LogOut, ChevronDown, Plus, Settings, HelpCircle,
 } from "lucide-react";
 
-import { clearDemoSession, isDemoSessionActive } from "@/lib/demo-auth";
+import { clearBrowserAuthSession, clearDemoSession, isDemoSessionActive } from "@/lib/demo-auth";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 
 const primaryNav = [
@@ -23,8 +23,8 @@ const primaryNav = [
 
 const secondaryNav = [
   { label: "Favourites", icon: Star },
-  { label: "Mail",       icon: Mail },
-  { label: "Talk",       icon: MessageSquare },
+  { label: "Mail",       icon: Mail, href: "/dashboard/mail" },
+  { label: "Talk",       icon: MessageSquare, href: "/dashboard/inbox" },
   { label: "Leads",      icon: Lightbulb, dot: true },
   { label: "Pipeline",   icon: TrendingUp },
   { label: "Team Data",  icon: BarChart2 },
@@ -52,13 +52,14 @@ function ThemeToggle() {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router   = useRouter();
-  const isLogin  = pathname === "/login";
+  const isLogin  = pathname === "/login" || pathname?.startsWith("/auth");
 
   async function signOut() {
-    if (isDemoSessionActive()) { clearDemoSession(); router.push("/login"); return; }
-    if (!isSupabaseConfigured()) { router.push("/login"); return; }
+    if (isDemoSessionActive()) { clearDemoSession(); router.push("/auth/login"); return; }
+    if (!isSupabaseConfigured()) { clearBrowserAuthSession(); router.push("/auth/login"); return; }
     await getSupabaseClient().auth.signOut();
-    router.push("/login");
+    clearBrowserAuthSession();
+    router.push("/auth/login");
   }
 
   if (isLogin) {
@@ -120,14 +121,33 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           {secondaryNav.slice(1).map((item) => {
             const Icon = item.icon;
-            return (
-              <div
-                key={item.label}
-                className="relative flex flex-col items-center justify-center gap-1 rounded-xl py-3 text-[10px] text-slate-500 dark:text-slate-400 transition hover:bg-white/40 dark:hover:bg-white/10 hover:text-slate-800 dark:hover:text-slate-300 cursor-pointer"
-              >
+            const active = item.href ? pathname?.startsWith(item.href) : false;
+            const className = `relative flex flex-col items-center justify-center gap-1 rounded-xl py-3 text-[10px] transition ${
+              active
+                ? "bg-brand-500/20 text-brand-700 dark:bg-brand-500/30 dark:text-brand-300"
+                : "text-slate-500 dark:text-slate-400 hover:bg-white/40 dark:hover:bg-white/10 hover:text-slate-800 dark:hover:text-slate-300"
+            }`;
+            const content = (
+              <>
+                {active && (
+                  <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full bg-brand-500 dark:bg-brand-400" />
+                )}
                 <Icon size={16} strokeWidth={1.6} />
                 <span className="max-w-[58px] text-center leading-tight">{item.label}</span>
                 {item.dot && <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-brand-500 shadow-[0_0_8px_rgba(99,102,241,0.8)]" />}
+              </>
+            );
+            return item.href ? (
+              <Link
+                key={item.label}
+                href={item.href}
+                className={className}
+              >
+                {content}
+              </Link>
+            ) : (
+              <div key={item.label} className={`${className} cursor-pointer`}>
+                {content}
               </div>
             );
           })}
@@ -139,10 +159,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <HelpCircle size={16} strokeWidth={1.6} />
             <span>Help</span>
           </div>
-          <div className="flex flex-col items-center gap-1 rounded-xl py-2.5 text-[10px] text-slate-500 dark:text-slate-400 hover:bg-white/40 dark:hover:bg-white/10 hover:text-slate-800 dark:hover:text-slate-300 transition cursor-pointer">
+          <Link href="/dashboard/settings/channels" className={`flex flex-col items-center gap-1 rounded-xl py-2.5 text-[10px] transition ${
+            pathname?.startsWith("/dashboard/settings")
+              ? "bg-brand-500/20 text-brand-700 dark:bg-brand-500/30 dark:text-brand-300"
+              : "text-slate-500 dark:text-slate-400 hover:bg-white/40 dark:hover:bg-white/10 hover:text-slate-800 dark:hover:text-slate-300"
+          }`}>
             <Settings size={16} strokeWidth={1.6} />
             <span>Settings</span>
-          </div>
+          </Link>
         </div>
       </aside>
 

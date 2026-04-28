@@ -5,7 +5,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.security import AuthError, decode_supabase_token
+from app.core.security import AuthError, verify_supabase_token
 from app.db.session import get_db_session
 
 
@@ -30,7 +30,7 @@ async def get_current_auth(token: str | None = Depends(oauth2_scheme)) -> AuthCo
         )
 
     try:
-        payload = decode_supabase_token(token)
+        payload = await verify_supabase_token(token)
     except AuthError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

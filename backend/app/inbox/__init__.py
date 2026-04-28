@@ -1,0 +1,1 @@
+"""Communication hub backend package."""

@@ -1,4 +1,4 @@
-import { isDemoSessionActive } from "@/lib/demo-auth";
+import { clearBrowserAuthSession, clearDemoSession, isDemoSessionActive } from "@/lib/demo-auth";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
@@ -41,6 +41,12 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
       }
     } catch {
       // Ignore non-JSON error body.
+    }
+    if (response.status === 401 && typeof window !== "undefined") {
+      clearDemoSession();
+      clearBrowserAuthSession();
+      await getSupabaseClient().auth.signOut();
+      window.location.assign(`/auth/login?reason=${encodeURIComponent(detail)}`);
     }
     throw new Error(detail);
   }

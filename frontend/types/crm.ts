@@ -75,3 +75,83 @@ export type OrderListResponse = {
     offset: number;
   };
 };
+
+export type ChannelType = "facebook" | "instagram" | "whatsapp" | "email" | "website" | "api";
+export type ConversationStatus = "open" | "resolved" | "pending";
+export type MessageType = "incoming" | "outgoing";
+export type SenderType = "contact" | "agent";
+
+export type PaginationMeta = {
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type InboxIntegration = {
+  id: string;
+  workspace_id: string;
+  name: string;
+  channel_type: ChannelType;
+  channel_config: Record<string, unknown>;
+  created_at: string;
+};
+
+export type InboxContact = {
+  id: string;
+  workspace_id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  avatar_url: string | null;
+  channel_identifiers: Record<string, unknown>;
+  created_at: string;
+};
+
+export type InboxConversation = {
+  id: string;
+  workspace_id: string;
+  inbox_id: string;
+  contact_id: string;
+  status: ConversationStatus;
+  channel_type: ChannelType;
+  last_message_at: string | null;
+  created_at: string;
+  contact: InboxContact | null;
+  inbox: InboxIntegration | null;
+  last_message_preview: string | null;
+};
+
+export type InboxMessage = {
+  id: string;
+  conversation_id: string;
+  content: string;
+  message_type: MessageType;
+  sender_type: SenderType;
+  sender_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+export type ConversationListResponse = {
+  data: InboxConversation[];
+  meta: PaginationMeta;
+};
+
+export type MessageListResponse = {
+  data: InboxMessage[];
+  meta: PaginationMeta;
+};
+
+export type IntegrationListResponse = {
+  data: InboxIntegration[];
+  meta: PaginationMeta;
+};
+
+export type EmailComposePayload = {
+  to_email: string;
+  to_name?: string;
+  subject: string;
+  content: string;
+  inbox_id?: string;
+  metadata?: Record<string, unknown>;
+};

@@ -1,0 +1,5 @@
+Alembic migrations for the OKI CRM FastAPI backend.
+
+Run from the backend directory:
+
+    alembic upgrade head

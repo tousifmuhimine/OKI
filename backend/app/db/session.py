@@ -14,6 +14,7 @@ engine = create_async_engine(
     settings.supabase_db_url,
     echo=settings.debug,
     pool_pre_ping=True,
+    connect_args={"statement_cache_size": 0},
 )
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 

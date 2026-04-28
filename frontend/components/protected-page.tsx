@@ -25,7 +25,7 @@ export function ProtectedPage({ children }: ProtectedPageProps) {
     }
 
     if (!isSupabaseConfigured()) {
-      router.replace("/login");
+      router.replace("/auth/login");
       return () => {
         active = false;
       };
@@ -41,14 +41,14 @@ export function ProtectedPage({ children }: ProtectedPageProps) {
         }
 
         if (!data.session) {
-          router.replace("/login");
+          router.replace("/auth/login");
           return;
         }
 
         setReady(true);
       })
       .catch(() => {
-        router.replace("/login");
+        router.replace("/auth/login");
       });
 
     return () => {
