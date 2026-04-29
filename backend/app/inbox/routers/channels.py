@@ -30,10 +30,20 @@ async def verify_facebook_webhook(
     raise HTTPException(status_code=403, detail="Invalid webhook verification token")
 
 
+@router.get("/webhooks/whatsapp", response_class=PlainTextResponse)
+async def verify_whatsapp_webhook(
+    mode: str | None = Query(default=None, alias="hub.mode"),
+    token: str | None = Query(default=None, alias="hub.verify_token"),
+    challenge: str | None = Query(default=None, alias="hub.challenge"),
+) -> str:
+    if mode == "subscribe" and challenge and token == settings.meta_webhook_verify_token:
+        return challenge
+    raise HTTPException(status_code=403, detail="Invalid webhook verification token")
+
+
 @router.post("/webhooks/facebook", response_model=WebhookAck)
 async def receive_facebook_webhook(
     request: Request,
-    _: AuthContext = Depends(get_current_auth),
 ) -> WebhookAck:
     await _json_payload(request)
     return WebhookAck()
@@ -42,7 +52,6 @@ async def receive_facebook_webhook(
 @router.post("/webhooks/whatsapp", response_model=WebhookAck)
 async def receive_whatsapp_webhook(
     request: Request,
-    _: AuthContext = Depends(get_current_auth),
 ) -> WebhookAck:
     await _json_payload(request)
     return WebhookAck()

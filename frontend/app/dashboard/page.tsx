@@ -10,6 +10,7 @@ import {
 
 import { ProtectedPage } from "@/components/protected-page";
 import { apiRequest } from "@/lib/api";
+import { getSupabaseClient } from "@/lib/supabase";
 import { Customer, CustomerListResponse, DashboardSummary } from "@/types/crm";
 
 // ─── Static data ─────────────────────────────────────────────────
@@ -129,6 +130,7 @@ export default function DashboardPage() {
   const [clock, setClock]         = useState(currentTime);
   const [activeTab, setActiveTab] = useState(0);
   const [notice, setNotice]       = useState(true);
+  const [userName, setUserName]   = useState("Ji-ho");
 
   useEffect(() => {
     let alive = true;
@@ -147,6 +149,15 @@ export default function DashboardPage() {
     return () => window.clearInterval(t);
   }, []);
 
+  useEffect(() => {
+    getSupabaseClient().auth.getUser().then(({ data }) => {
+      if (data.user) {
+        const name = data.user.user_metadata?.name || data.user.email?.split('@')[0] || "Ji-ho";
+        setUserName(name);
+      }
+    });
+  }, []);
+
   const today = new Date().toLocaleDateString("en-US", {
     weekday: "long", month: "long", day: "numeric", year: "numeric",
   });
@@ -159,7 +170,7 @@ export default function DashboardPage() {
         <div className="mb-5 flex flex-wrap items-end justify-between gap-3 animate-fade-up">
           <div>
             <h1 className="text-[22px] font-bold tracking-tight text-slate-900 dark:text-white">
-              Good afternoon, Ji-ho 👋
+              Good afternoon, {userName} 👋
             </h1>
             <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-300 drop-shadow-sm">{today} · Here&apos;s your workspace overview</p>
           </div>

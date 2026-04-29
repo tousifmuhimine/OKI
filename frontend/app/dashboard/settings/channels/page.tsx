@@ -62,10 +62,17 @@ function ChannelInstructions({ channelType }: { channelType: ChannelType }) {
       </div>
     );
   }
-  if (channelType === "facebook" || channelType === "instagram") {
+  if (channelType === "facebook") {
     return (
       <div className="rounded-xl border border-blue-200 bg-blue-50/80 px-4 py-3 text-sm text-blue-800 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200">
         Create a Meta app and page access token, then connect your page here. Webhook URL: /api/v1/inbox/webhooks/facebook.
+      </div>
+    );
+  }
+  if (channelType === "instagram") {
+    return (
+      <div className="rounded-xl border border-fuchsia-200 bg-fuchsia-50/80 px-4 py-3 text-sm text-fuchsia-800 dark:border-fuchsia-500/20 dark:bg-fuchsia-500/10 dark:text-fuchsia-200">
+        Create a Meta app, connect your Facebook Page, and provide your Instagram Business Account ID. Webhook URL: /api/v1/inbox/webhooks/instagram.
       </div>
     );
   }
@@ -122,10 +129,17 @@ export default function ChannelSettingsPage() {
   }
 
   function buildConfig() {
-    if (channelType === "facebook" || channelType === "instagram") {
+    if (channelType === "facebook") {
       return {
         page_access_token: form.page_access_token ?? "",
         page_id: form.page_id ?? "",
+      };
+    }
+    if (channelType === "instagram") {
+      return {
+        page_access_token: form.page_access_token ?? "",
+        page_id: form.page_id ?? "",
+        instagram_business_account_id: form.instagram_business_account_id ?? "",
       };
     }
     if (channelType === "whatsapp") {
@@ -310,13 +324,27 @@ export default function ChannelSettingsPage() {
                 <input value={name} onChange={(event) => setName(event.target.value)} className={fieldClass()} placeholder="Sales inbox" />
               </Field>
 
-              {(channelType === "facebook" || channelType === "instagram") ? (
+              {channelType === "facebook" ? (
                 <>
                   <Field label="Page access token">
                     <input required value={form.page_access_token ?? ""} onChange={(event) => updateField("page_access_token", event.target.value)} className={fieldClass()} placeholder="Meta page access token" />
                   </Field>
                   <Field label="Page ID">
                     <input required value={form.page_id ?? ""} onChange={(event) => updateField("page_id", event.target.value)} className={fieldClass()} placeholder="Connected page ID" />
+                  </Field>
+                </>
+              ) : null}
+
+              {channelType === "instagram" ? (
+                <>
+                  <Field label="Page access token">
+                    <input required value={form.page_access_token ?? ""} onChange={(event) => updateField("page_access_token", event.target.value)} className={fieldClass()} placeholder="Meta page access token" />
+                  </Field>
+                  <Field label="Facebook Page ID">
+                    <input required value={form.page_id ?? ""} onChange={(event) => updateField("page_id", event.target.value)} className={fieldClass()} placeholder="Connected Facebook page ID" />
+                  </Field>
+                  <Field label="Instagram Business Account ID">
+                    <input required value={form.instagram_business_account_id ?? ""} onChange={(event) => updateField("instagram_business_account_id", event.target.value)} className={fieldClass()} placeholder="Instagram Business Account ID" />
                   </Field>
                 </>
               ) : null}
