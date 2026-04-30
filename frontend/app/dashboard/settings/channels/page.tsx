@@ -7,6 +7,15 @@ import { ProtectedPage } from "@/components/protected-page";
 import { apiRequest } from "@/lib/api";
 import { ChannelType, InboxIntegration, IntegrationListResponse } from "@/types/crm";
 
+type ChannelPreset = "live" | "sandbox";
+type MetaChannelType = "facebook" | "instagram" | "whatsapp";
+
+type MetaConfigField = {
+  label: string;
+  description: string;
+  values: Record<string, string>;
+};
+
 const channelOptions: Array<{ type: ChannelType; label: string; icon: React.ElementType }> = [
   { type: "facebook", label: "Facebook", icon: MessageCircle },
   { type: "instagram", label: "Instagram", icon: Camera },
@@ -86,9 +95,52 @@ function ChannelInstructions({ channelType }: { channelType: ChannelType }) {
   return null;
 }
 
+const metaPresetOptions: Array<{ value: ChannelPreset; label: string; description: string }> = [
+  {
+    value: "sandbox",
+    label: "Sandbox / Test",
+    description: "Save test credentials separately so you can verify the integration before going live.",
+  },
+  {
+    value: "live",
+    label: "Live / Production",
+    description: "Use your production credentials and keep them stored for this workspace.",
+  },
+];
+
+const metaSandboxFixtures: Record<MetaChannelType, MetaConfigField> = {
+  facebook: {
+    label: "Facebook sandbox",
+    description: "Mock delivery using Facebook-style values without calling Meta.",
+    values: {
+      page_access_token: "sandbox-page-access-token",
+      page_id: "sandbox-page-id",
+    },
+  },
+  instagram: {
+    label: "Instagram sandbox",
+    description: "Mock delivery using Instagram-style values without calling Meta.",
+    values: {
+      page_access_token: "sandbox-page-access-token",
+      page_id: "sandbox-facebook-page-id",
+      instagram_business_account_id: "sandbox-instagram-business-account-id",
+    },
+  },
+  whatsapp: {
+    label: "WhatsApp sandbox",
+    description: "Mock delivery using WhatsApp Cloud API-style values without calling Meta.",
+    values: {
+      api_token: "sandbox-whatsapp-api-token",
+      phone_number_id: "sandbox-phone-number-id",
+      business_account_id: "sandbox-business-account-id",
+    },
+  },
+};
+
 export default function ChannelSettingsPage() {
   const [integrations, setIntegrations] = useState<InboxIntegration[]>([]);
   const [channelType, setChannelType] = useState<ChannelType>("facebook");
+  const [channelPreset, setChannelPreset] = useState<ChannelPreset>("live");
   const [name, setName] = useState("");
   const [form, setForm] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
@@ -115,6 +167,15 @@ export default function ChannelSettingsPage() {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
+  function applyMetaSandboxValues(nextChannelType: MetaChannelType) {
+    const fixture = metaSandboxFixtures[nextChannelType];
+    setForm((current) => ({
+      ...current,
+      ...fixture.values,
+    }));
+    setName((current) => current || fixture.label);
+  }
+
   function applyEmailPreset(provider: string) {
     const preset = emailProviderPresets[provider] ?? emailProviderPresets.custom;
     setForm((current) => ({
@@ -131,12 +192,14 @@ export default function ChannelSettingsPage() {
   function buildConfig() {
     if (channelType === "facebook") {
       return {
+        integration_mode: channelPreset,
         page_access_token: form.page_access_token ?? "",
         page_id: form.page_id ?? "",
       };
     }
     if (channelType === "instagram") {
       return {
+        integration_mode: channelPreset,
         page_access_token: form.page_access_token ?? "",
         page_id: form.page_id ?? "",
         instagram_business_account_id: form.instagram_business_account_id ?? "",
@@ -144,6 +207,7 @@ export default function ChannelSettingsPage() {
     }
     if (channelType === "whatsapp") {
       return {
+        integration_mode: channelPreset,
         api_token: form.api_token ?? "",
         phone_number_id: form.phone_number_id ?? "",
         business_account_id: form.business_account_id ?? "",
@@ -166,8 +230,9 @@ export default function ChannelSettingsPage() {
   async function createIntegration(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
+    setError(null);
     try {
-      await apiRequest<InboxIntegration>("/integrations", {
+      const newIntegration = await apiRequest<InboxIntegration>("/integrations", {
         method: "POST",
         body: JSON.stringify({
           name: name || selected.label,
@@ -175,10 +240,12 @@ export default function ChannelSettingsPage() {
           channel_config: buildConfig(),
         }),
       });
+      setIntegrations((current) => [...current, newIntegration]);
       setName("");
       setForm({});
-      setNotice("Channel connected.");
-      await loadIntegrations();
+      setChannelPreset("live");
+      setNotice("Channel connected successfully.");
+      setError(null);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -309,7 +376,15 @@ export default function ChannelSettingsPage() {
                   <button
                     key={option.type}
                     type="button"
-                    onClick={() => { setChannelType(option.type); setForm({}); }}
+                    onClick={() => {
+                      setChannelType(option.type);
+                      setForm({});
+                      setName("");
+                      setChannelPreset(option.type === "email" ? "live" : "sandbox");
+                      if (option.type !== "email") {
+                        applyMetaSandboxValues(option.type as MetaChannelType);
+                      }
+                    }}
                     className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition ${channelType === option.type ? "border-brand-300 bg-brand-500/20 text-brand-700 dark:text-brand-300" : "border-white/30 bg-white/20 text-slate-600 hover:bg-white/40 dark:border-white/10 dark:bg-white/5 dark:text-slate-300"}`}
                   >
                     <Icon size={15} />
@@ -318,6 +393,27 @@ export default function ChannelSettingsPage() {
                 );
               })}
             </div>
+
+            {channelType !== "email" ? (
+              <div className="mb-4 grid gap-2 sm:grid-cols-2">
+                {metaPresetOptions.map((preset) => (
+                  <button
+                    key={preset.value}
+                    type="button"
+                    onClick={() => {
+                      setChannelPreset(preset.value);
+                      if (preset.value === "sandbox" && (channelType === "facebook" || channelType === "instagram" || channelType === "whatsapp")) {
+                        applyMetaSandboxValues(channelType);
+                      }
+                    }}
+                    className={`rounded-xl border px-3 py-3 text-left transition ${channelPreset === preset.value ? "border-brand-300 bg-brand-500/15 text-brand-800 dark:border-brand-500/40 dark:bg-brand-500/20 dark:text-brand-100" : "border-white/30 bg-white/20 text-slate-600 hover:bg-white/40 dark:border-white/10 dark:bg-white/5 dark:text-slate-300"}`}
+                  >
+                    <div className="text-sm font-semibold">{preset.label}</div>
+                    <div className="mt-1 text-xs leading-5 opacity-80">{preset.description}</div>
+                  </button>
+                ))}
+              </div>
+            ) : null}
 
             <div className="space-y-3">
               <Field label="Channel name">

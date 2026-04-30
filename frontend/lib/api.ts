@@ -1,4 +1,4 @@
-import { clearBrowserAuthSession, clearDemoSession, isDemoSessionActive } from "@/lib/demo-auth";
+import { clearAllAuthState, getDevWorkspaceId, isDemoSessionActive } from "@/lib/demo-auth";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
@@ -8,10 +8,17 @@ async function buildHeaders(init?: HeadersInit): Promise<Headers> {
   headers.set("Content-Type", "application/json");
 
   if (isDemoSessionActive() || !isSupabaseConfigured()) {
+    headers.set("X-Dev-Workspace-Id", getDevWorkspaceId());
     return headers;
   }
 
-  const { data } = await getSupabaseClient().auth.getSession();
+  let data;
+  try {
+    ({ data } = await getSupabaseClient().auth.getSession());
+  } catch {
+    clearAllAuthState();
+    return headers;
+  }
   const token = data.session?.access_token;
 
   if (token) {
@@ -43,9 +50,8 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
       // Ignore non-JSON error body.
     }
     if (response.status === 401 && typeof window !== "undefined") {
-      clearDemoSession();
-      clearBrowserAuthSession();
-      await getSupabaseClient().auth.signOut();
+      clearAllAuthState();
+      await getSupabaseClient().auth.signOut().catch(() => undefined);
       window.location.assign(`/auth/login?reason=${encodeURIComponent(detail)}`);
     }
     throw new Error(detail);

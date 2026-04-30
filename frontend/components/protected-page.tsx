@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { isDemoSessionActive } from "@/lib/demo-auth";
+import { clearAllAuthState, isDemoSessionActive } from "@/lib/demo-auth";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 
 type ProtectedPageProps = {
@@ -48,6 +48,7 @@ export function ProtectedPage({ children }: ProtectedPageProps) {
         setReady(true);
       })
       .catch(() => {
+        clearAllAuthState();
         router.replace("/auth/login");
       });
 

@@ -11,7 +11,7 @@ import {
   LogOut, ChevronDown, Plus, Settings, HelpCircle,
 } from "lucide-react";
 
-import { clearBrowserAuthSession, clearDemoSession, isDemoSessionActive } from "@/lib/demo-auth";
+import { clearAllAuthState, isDemoSessionActive } from "@/lib/demo-auth";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 
 const primaryNav = [
@@ -55,10 +55,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const isLogin  = pathname === "/login" || pathname?.startsWith("/auth");
 
   async function signOut() {
-    if (isDemoSessionActive()) { clearDemoSession(); router.push("/auth/login"); return; }
-    if (!isSupabaseConfigured()) { clearBrowserAuthSession(); router.push("/auth/login"); return; }
-    await getSupabaseClient().auth.signOut();
-    clearBrowserAuthSession();
+    clearAllAuthState();
+    if (!isDemoSessionActive() && isSupabaseConfigured()) {
+      await getSupabaseClient().auth.signOut().catch(() => undefined);
+    }
     router.push("/auth/login");
   }
 

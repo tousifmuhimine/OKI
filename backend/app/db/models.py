@@ -158,8 +158,8 @@ class Conversation(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
     workspace_id: Mapped[str] = mapped_column(String(36), index=True)
-    inbox_id: Mapped[str] = mapped_column(String(36), ForeignKey("inboxes.id"), index=True)
-    contact_id: Mapped[str] = mapped_column(String(36), ForeignKey("contacts.id"), index=True)
+    inbox_id: Mapped[str] = mapped_column(String(36), ForeignKey("inboxes.id", ondelete="CASCADE"), index=True)
+    contact_id: Mapped[str] = mapped_column(String(36), ForeignKey("contacts.id", ondelete="CASCADE"), index=True)
     status: Mapped[str] = mapped_column(conversation_status_enum, default="open", index=True)
     channel_type: Mapped[str] = mapped_column(channel_type_enum, index=True)
     last_message_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -41,6 +41,19 @@ function messageBody(message: InboxMessage) {
   return message.content;
 }
 
+function isSandboxMessage(message: InboxMessage) {
+  const channelResult = message.metadata?.channel_result;
+  if (!channelResult || typeof channelResult !== "object") return false;
+  return (channelResult as { mode?: unknown }).mode === "sandbox";
+}
+
+function sandboxProviderLabel(message: InboxMessage) {
+  const channelResult = message.metadata?.channel_result;
+  if (!channelResult || typeof channelResult !== "object") return null;
+  const provider = (channelResult as { provider?: unknown }).provider;
+  return typeof provider === "string" && provider.trim() ? provider : null;
+}
+
 export default function MailPage() {
   const [conversations, setConversations] = useState<InboxConversation[]>([]);
   const [integrations, setIntegrations] = useState<InboxIntegration[]>([]);
@@ -271,11 +284,20 @@ export default function MailPage() {
                   <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
                     {messages.map((message) => {
                       const outgoing = message.message_type === "outgoing";
+                      const sandbox = outgoing && isSandboxMessage(message);
+                      const providerLabel = sandboxProviderLabel(message);
                       return (
                         <article key={message.id} className={`rounded-xl border px-4 py-3 ${outgoing ? "border-amber-200 bg-amber-50/80 dark:border-amber-500/20 dark:bg-amber-500/10" : "border-white/40 bg-white/70 dark:border-white/10 dark:bg-white/10"}`}>
-                          <div className="mb-2 flex items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
+                          <div className="mb-2 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
                             <span className="font-semibold text-slate-700 dark:text-slate-200">{outgoing ? "You" : selected.contact?.name ?? selected.contact?.email ?? "Sender"}</span>
-                            <span>{formatDate(message.created_at)}</span>
+                            <span className="flex items-center gap-2">
+                              {sandbox ? (
+                                <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 font-semibold text-emerald-700 dark:text-emerald-300">
+                                  Sandbox test {providerLabel ? `· ${providerLabel}` : ""}
+                                </span>
+                              ) : null}
+                              <span>{formatDate(message.created_at)}</span>
+                            </span>
                           </div>
                           <p className="whitespace-pre-wrap text-sm leading-6 text-slate-800 dark:text-slate-100">{messageBody(message)}</p>
                         </article>

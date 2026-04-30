@@ -8,6 +8,10 @@ from app.db.models import Contact, Conversation
 GRAPH_API_VERSION = "v19.0"
 
 
+def _is_sandbox(channel_config: dict[str, Any]) -> bool:
+    return channel_config.get("integration_mode") == "sandbox"
+
+
 def _recipient_id(contact: Contact | None) -> str:
     if not contact:
         raise ValueError("Facebook messages require a contact")
@@ -23,6 +27,17 @@ async def send_message(
     channel_config: dict[str, Any],
     contact: Contact | None = None,
 ) -> dict[str, Any]:
+    if _is_sandbox(channel_config):
+        return {
+            "provider": "facebook",
+            "mode": "sandbox",
+            "response": {
+                "message_id": f"sandbox-facebook-{conversation.id}",
+                "recipient_id": _recipient_id(contact) if contact else None,
+                "preview": message_text[:120],
+            },
+        }
+
     page_access_token = channel_config.get("page_access_token")
     page_id = channel_config.get("page_id")
     if not page_access_token or not page_id:

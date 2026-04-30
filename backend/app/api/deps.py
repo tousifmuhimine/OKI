@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,9 +19,12 @@ class AuthContext:
     role: str | None = None
 
 
-async def get_current_auth(token: str | None = Depends(oauth2_scheme)) -> AuthContext:
+async def get_current_auth(
+    token: str | None = Depends(oauth2_scheme),
+    dev_workspace_id: str | None = Header(default=None, alias="X-Dev-Workspace-Id"),
+) -> AuthContext:
     if settings.allow_anon_dev and settings.debug:
-        return AuthContext(user_id="dev-user", email="dev@local")
+        return AuthContext(user_id=dev_workspace_id or "dev-user", email="dev@local")
 
     if not token:
         raise HTTPException(

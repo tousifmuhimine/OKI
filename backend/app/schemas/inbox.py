@@ -108,3 +108,6 @@ class MessageListResponse(BaseModel):
 
 class WebhookAck(BaseModel):
     received: bool = True
+    processed: int = 0
+    skipped: int = 0
+    skipped_no_inbox: int = 0

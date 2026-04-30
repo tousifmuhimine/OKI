@@ -55,6 +55,19 @@ function ChannelBadge({ type }: { type: ChannelType }) {
   );
 }
 
+function isSandboxMessage(message: InboxMessage) {
+  const channelResult = message.metadata?.channel_result;
+  if (!channelResult || typeof channelResult !== "object") return false;
+  return (channelResult as { mode?: unknown }).mode === "sandbox";
+}
+
+function sandboxProviderLabel(message: InboxMessage) {
+  const channelResult = message.metadata?.channel_result;
+  if (!channelResult || typeof channelResult !== "object") return null;
+  const provider = (channelResult as { provider?: unknown }).provider;
+  return typeof provider === "string" && provider.trim() ? provider : null;
+}
+
 function InboxPageContent() {
   const searchParams = useSearchParams();
   const initialChannel = searchParams.get("channel");
@@ -286,9 +299,16 @@ function InboxPageContent() {
                   ) : (
                     messages.map((message) => {
                       const outgoing = message.message_type === "outgoing";
+                      const sandbox = outgoing && isSandboxMessage(message);
+                      const providerLabel = sandboxProviderLabel(message);
                       return (
                         <div key={message.id} className={`flex ${outgoing ? "justify-end" : "justify-start"}`}>
                           <div className={`max-w-[78%] rounded-2xl px-4 py-2.5 text-sm shadow-sm ${outgoing ? "bg-brand-500 text-white" : "bg-white/70 text-slate-800 dark:bg-white/10 dark:text-slate-100"}`}>
+                            {sandbox ? (
+                              <div className="mb-2 inline-flex rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
+                                Sandbox test{providerLabel ? ` · ${providerLabel}` : ""}
+                              </div>
+                            ) : null}
                             <p className="whitespace-pre-wrap">{message.content}</p>
                             <p className={`mt-1 text-[10px] ${outgoing ? "text-white/70" : "text-slate-500"}`}>{formatTime(message.created_at)}</p>
                           </div>

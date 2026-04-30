@@ -8,6 +8,10 @@ from app.db.models import Contact, Conversation
 GRAPH_API_VERSION = "v19.0"
 
 
+def _is_sandbox(channel_config: dict[str, Any]) -> bool:
+    return channel_config.get("integration_mode") == "sandbox"
+
+
 def _phone_number(contact: Contact | None) -> str:
     if not contact:
         raise ValueError("WhatsApp messages require a contact")
@@ -23,6 +27,17 @@ async def send_message(
     channel_config: dict[str, Any],
     contact: Contact | None = None,
 ) -> dict[str, Any]:
+    if _is_sandbox(channel_config):
+        return {
+            "provider": "whatsapp",
+            "mode": "sandbox",
+            "response": {
+                "message_id": f"sandbox-whatsapp-{conversation.id}",
+                "recipient": _phone_number(contact) if contact else None,
+                "preview": message_text[:120],
+            },
+        }
+
     api_token = channel_config.get("api_token")
     phone_number_id = channel_config.get("phone_number_id")
     if not api_token or not phone_number_id:

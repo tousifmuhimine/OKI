@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, get_current_auth, get_session_dep
@@ -184,9 +184,14 @@ async def delete_integration(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> None:
+    # Verify inbox exists and belongs to the user
     inbox = await session.get(Inbox, inbox_id)
-    if not inbox or inbox.workspace_id != auth.user_id:
+    if not inbox:
         raise HTTPException(status_code=404, detail="Integration not found")
-
-    await session.delete(inbox)
+    
+    if inbox.workspace_id != auth.user_id:
+        raise HTTPException(status_code=404, detail="Integration not found")
+    
+    # Use delete statement for async SQLAlchemy
+    await session.execute(delete(Inbox).where(Inbox.id == inbox_id))
     await session.commit()
