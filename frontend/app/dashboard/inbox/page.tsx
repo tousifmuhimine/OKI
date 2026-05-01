@@ -1,9 +1,10 @@
 "use client";
 
-import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
+import { FormEvent, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   AtSign,
+  ArrowLeft,
   Camera,
   CheckCircle2,
   Filter,
@@ -80,10 +81,12 @@ function InboxPageContent() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<InboxMessage[]>([]);
   const [draft, setDraft] = useState("");
+  const [mobileThreadOpen, setMobileThreadOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
 
   const selected = conversations.find((item) => item.id === selectedId) ?? conversations[0] ?? null;
 
@@ -126,10 +129,17 @@ function InboxPageContent() {
   useEffect(() => {
     if (!selected?.id) {
       setMessages([]);
+      setMobileThreadOpen(false);
       return;
     }
     void loadMessages(selected.id);
   }, [selected?.id]);
+
+  useEffect(() => {
+    if (mobileThreadOpen) {
+      window.setTimeout(() => composerRef.current?.focus(), 180);
+    }
+  }, [mobileThreadOpen, selected?.id]);
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -178,8 +188,8 @@ function InboxPageContent() {
 
   return (
     <ProtectedPage>
-      <section className="min-h-[calc(100vh-54px)] bg-transparent p-4 sm:p-6">
-        <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+      <section className="min-h-[calc(100vh-54px)] bg-transparent px-0 pb-0 pt-3 sm:p-6">
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-3 px-4 sm:mb-5 sm:px-0">
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-brand-500 dark:text-brand-400">Communication Hub</p>
             <h1 className="mt-1 text-2xl font-bold text-slate-900 dark:text-white">Inbox</h1>
@@ -205,8 +215,11 @@ function InboxPageContent() {
           </p>
         ) : null}
 
-        <div className="grid min-h-[calc(100vh-170px)] gap-4 lg:grid-cols-[380px_minmax(0,1fr)]">
-          <aside className="glass-card flex min-h-[520px] flex-col overflow-hidden">
+        <div className="grid min-h-[calc(100vh-142px)] gap-0 sm:gap-4 lg:min-h-[calc(100vh-170px)] lg:grid-cols-[380px_minmax(0,1fr)]">
+          <aside
+            aria-label="Conversation list"
+            className={`glass-card min-h-[calc(100vh-142px)] flex-col overflow-hidden rounded-none border-x-0 transition-all duration-200 sm:rounded-2xl sm:border-x lg:flex lg:min-h-[520px] ${mobileThreadOpen ? "hidden lg:flex" : "flex animate-fade-in"}`}
+          >
             <div className="border-b border-white/20 p-4 dark:border-white/10">
               <div className="flex items-center gap-2 rounded-xl border border-white/50 bg-white/50 px-3 py-2 text-sm dark:border-white/10 dark:bg-black/20">
                 <Search size={14} className="text-slate-500" />
@@ -259,8 +272,11 @@ function InboxPageContent() {
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => setSelectedId(item.id)}
-                    className={`mb-1 flex w-full gap-3 rounded-xl p-3 text-left transition ${selected?.id === item.id ? "bg-brand-500/15 ring-1 ring-brand-300/40" : "hover:bg-white/40 dark:hover:bg-white/10"}`}
+                    onClick={() => {
+                      setSelectedId(item.id);
+                      setMobileThreadOpen(true);
+                    }}
+                    className={`mb-1 flex min-h-16 w-full gap-3 rounded-xl p-3 text-left transition active:scale-[0.99] ${selected?.id === item.id ? "bg-brand-500/15 ring-1 ring-brand-300/40" : "hover:bg-white/40 dark:hover:bg-white/10"}`}
                   >
                     <ChannelBadge type={item.channel_type} />
                     <span className="min-w-0 flex-1">
@@ -276,24 +292,37 @@ function InboxPageContent() {
             </div>
           </aside>
 
-          <main className="glass-card flex min-h-[520px] flex-col overflow-hidden">
+          <main
+            role={mobileThreadOpen ? "dialog" : undefined}
+            aria-modal={mobileThreadOpen ? "true" : undefined}
+            aria-label="Conversation thread"
+            className={`glass-card min-h-[calc(100vh-142px)] flex-col overflow-hidden rounded-none border-x-0 transition-all duration-200 sm:rounded-2xl sm:border-x lg:flex lg:min-h-[520px] ${mobileThreadOpen ? "flex animate-fade-in" : "hidden lg:flex"}`}
+          >
             {selected ? (
               <>
-                <div className="flex items-center justify-between border-b border-white/20 px-5 py-4 dark:border-white/10">
+                <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/20 bg-white/55 px-4 py-3 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/45 sm:px-5 sm:py-4">
                   <div className="flex min-w-0 items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setMobileThreadOpen(false)}
+                      aria-label="Back to conversations"
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-slate-600 transition hover:bg-white/60 active:scale-95 dark:text-slate-300 dark:hover:bg-white/10 lg:hidden"
+                    >
+                      <ArrowLeft size={20} />
+                    </button>
                     <ChannelBadge type={selected.channel_type} />
                     <div className="min-w-0">
                       <h2 className="truncate text-base font-semibold text-slate-900 dark:text-white">{selected.contact?.name ?? "Unknown contact"}</h2>
                       <p className="truncate text-xs text-slate-500 dark:text-slate-400">{selected.inbox?.name ?? channelMeta[selected.channel_type].label} · {selected.contact?.email ?? selected.contact?.phone ?? "No contact detail"}</p>
                     </div>
                   </div>
-                  <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold capitalize text-emerald-600 dark:text-emerald-300">
+                  <span className="hidden items-center gap-1.5 rounded-lg bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold capitalize text-emerald-600 dark:text-emerald-300 sm:inline-flex">
                     <CheckCircle2 size={12} />
                     {selected.status}
                   </span>
                 </div>
 
-                <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
+                <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4 sm:px-5">
                   {messages.length === 0 ? (
                     <div className="grid h-full place-items-center text-sm text-slate-500 dark:text-slate-400">No messages in this conversation yet.</div>
                   ) : (
@@ -303,7 +332,7 @@ function InboxPageContent() {
                       const providerLabel = sandboxProviderLabel(message);
                       return (
                         <div key={message.id} className={`flex ${outgoing ? "justify-end" : "justify-start"}`}>
-                          <div className={`max-w-[78%] rounded-2xl px-4 py-2.5 text-sm shadow-sm ${outgoing ? "bg-brand-500 text-white" : "bg-white/70 text-slate-800 dark:bg-white/10 dark:text-slate-100"}`}>
+                          <div className={`max-w-[86%] rounded-2xl px-4 py-3 text-[15px] shadow-sm sm:max-w-[78%] sm:px-4 sm:py-2.5 sm:text-sm ${outgoing ? "bg-brand-500 text-white" : "bg-white/70 text-slate-800 dark:bg-white/10 dark:text-slate-100"}`}>
                             {sandbox ? (
                               <div className="mb-2 inline-flex rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
                                 Sandbox test{providerLabel ? ` · ${providerLabel}` : ""}
@@ -318,21 +347,22 @@ function InboxPageContent() {
                   )}
                 </div>
 
-                <form onSubmit={sendMessage} className="border-t border-white/20 p-4 dark:border-white/10">
-                  <div className="flex items-end gap-3 rounded-2xl border border-white/50 bg-white/50 p-2 dark:border-white/10 dark:bg-black/20">
+                <form onSubmit={sendMessage} className="sticky bottom-0 border-t border-white/20 bg-white/45 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/35 sm:p-4">
+                  <div className="flex items-end gap-2 rounded-2xl border border-white/50 bg-white/60 p-2 dark:border-white/10 dark:bg-black/25 sm:gap-3">
                     <textarea
+                      ref={composerRef}
                       value={draft}
                       onChange={(event) => setDraft(event.target.value)}
-                      className="max-h-32 min-h-11 flex-1 resize-none bg-transparent px-2 py-2 text-sm text-slate-800 outline-none placeholder:text-slate-400 dark:text-slate-100"
+                      className="max-h-36 min-h-12 flex-1 resize-none bg-transparent px-2 py-2 text-[16px] text-slate-800 outline-none placeholder:text-slate-400 dark:text-slate-100 sm:text-sm"
                       placeholder="Type your reply"
                     />
                     <button
                       type="submit"
                       disabled={sending || !draft.trim()}
                       aria-label="Send message"
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-500 text-white shadow-glow-sm transition hover:bg-brand-600 disabled:opacity-50"
+                      className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-brand-500 text-white shadow-glow-sm transition hover:bg-brand-600 active:scale-95 disabled:opacity-50"
                     >
-                      <Send size={16} />
+                      <Send size={19} />
                     </button>
                   </div>
                 </form>

@@ -10,6 +10,7 @@ from app.api.deps import get_session_dep
 from app.core.config import settings
 from app.db.models import Contact, Conversation, Inbox, Message
 from app.inbox.security import decrypt_channel_config
+from app.services.lead_capture import upsert_lead_from_inbound_message
 from app.schemas.inbox import WebhookAck
 
 
@@ -238,6 +239,14 @@ async def _ingest_messaging_payload(
             message_id=str(message.get("mid") or event.get("message_id") or "") or None,
             raw_event=event,
         ):
+            await upsert_lead_from_inbound_message(
+                session,
+                inbox=inbox,
+                contact=contact,
+                conversation=conversation,
+                channel_type=channel_type,
+                capture_source="auto",
+            )
             stats["processed"] += 1
         else:
             stats["skipped"] += 1
@@ -315,6 +324,14 @@ async def _ingest_whatsapp_payload(
                 message_id=str(message.get("id") or "") or None,
                 raw_event=value,
             ):
+                await upsert_lead_from_inbound_message(
+                    session,
+                    inbox=inbox,
+                    contact=contact,
+                    conversation=conversation,
+                    channel_type="whatsapp",
+                    capture_source="auto",
+                )
                 stats["processed"] += 1
             else:
                 stats["skipped"] += 1

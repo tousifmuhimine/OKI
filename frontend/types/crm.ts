@@ -40,6 +40,10 @@ export type Lead = {
   source: string | null;
   status: string;
   assigned_user_id: string | null;
+  contact_id: string | null;
+  inbox_id: string | null;
+  conversation_id: string | null;
+  capture_source: string | null;
   converted_customer_id: string | null;
   created_at: string;
   updated_at: string;
