@@ -14,6 +14,7 @@ from app.db.models import Contact, Conversation, Inbox, Message
 from app.db.models import UserLLMConfig
 from app.inbox.llm_providers.groq import DEFAULT_GROQ_MODEL
 from app.inbox.security import decrypt_channel_config
+from app.services.lead_capture import upsert_lead_from_inbound_message
 from app.schemas.inbox import WebhookAck
 from app.inbox.llm_providers.groq import GroqProvider
 from app.inbox.channels import send_channel_message
@@ -433,6 +434,14 @@ async def _ingest_messaging_payload(
             message_id=str(message.get("mid") or event.get("message_id") or "") or None,
             raw_event=event,
         ):
+            await upsert_lead_from_inbound_message(
+                session,
+                inbox=inbox,
+                contact=contact,
+                conversation=conversation,
+                channel_type=channel_type,
+                capture_source="auto",
+            )
             stats["processed"] += 1
             # attempt auto-reply in background (await here to keep it simple)
             try:
@@ -515,6 +524,14 @@ async def _ingest_whatsapp_payload(
                 message_id=str(message.get("id") or "") or None,
                 raw_event=value,
             ):
+                await upsert_lead_from_inbound_message(
+                    session,
+                    inbox=inbox,
+                    contact=contact,
+                    conversation=conversation,
+                    channel_type="whatsapp",
+                    capture_source="auto",
+                )
                 stats["processed"] += 1
                 try:
                     await _maybe_auto_reply(session, conversation, contact, inbox, body)

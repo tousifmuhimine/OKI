@@ -36,10 +36,15 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   }
 
   const headers = await buildHeaders(options.headers);
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...options,
+      headers,
+    });
+  } catch {
+    throw new Error("Unable to reach the backend API. Confirm backend is running and NEXT_PUBLIC_API_BASE_URL is correct.");
+  }
 
   if (!response.ok) {
     let detail = `Request failed (${response.status})`;

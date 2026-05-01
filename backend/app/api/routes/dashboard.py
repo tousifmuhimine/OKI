@@ -16,7 +16,7 @@ async def dashboard_summary(
     session: AsyncSession = Depends(get_session_dep),
 ) -> DashboardSummary:
     customers = (await session.execute(select(func.count(Customer.id)))).scalar_one()
-    leads = (await session.execute(select(func.count(Lead.id)))).scalar_one()
+    leads = (await session.execute(select(func.count(Lead.id)).where(Lead.status.notin_(["won", "lost"])))).scalar_one()
     opportunities = (await session.execute(select(func.count(Opportunity.id)))).scalar_one()
     products = (await session.execute(select(func.count(Product.id)))).scalar_one()
     orders = (await session.execute(select(func.count(SalesOrder.id)))).scalar_one()

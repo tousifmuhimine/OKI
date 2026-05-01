@@ -50,6 +50,28 @@ class Lead(Base, TimestampMixin):
     source: Mapped[str] = mapped_column(String(120), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(64), default="new", index=True)
     assigned_user_id: Mapped[str] = mapped_column(String(36), nullable=True)
+    notes: Mapped[str] = mapped_column(Text, nullable=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=True, index=True)
+    follow_up_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    contact_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("contacts.id"),
+        nullable=True,
+        index=True,
+    )
+    inbox_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("inboxes.id"),
+        nullable=True,
+        index=True,
+    )
+    conversation_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("conversations.id"),
+        nullable=True,
+        index=True,
+    )
+    capture_source: Mapped[str] = mapped_column(String(32), nullable=True, index=True)
     converted_customer_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("customers.id"),
