@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.routes import customers, dashboard, health, leads, orders
 from app.inbox.routers import channels, inbox, integrations
+from app.inbox.routers import ai
 
 
 api_router = APIRouter()
@@ -13,3 +14,4 @@ api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboar
 api_router.include_router(inbox.router, prefix="/inbox", tags=["inbox"])
 api_router.include_router(channels.router, prefix="/inbox", tags=["inbox-channels"])
 api_router.include_router(integrations.router, prefix="/integrations", tags=["integrations"])
+api_router.include_router(ai.router, prefix="/ai", tags=["ai"])

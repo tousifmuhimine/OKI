@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 from typing import Any, Iterable
+import asyncio
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
@@ -9,10 +11,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_session_dep
 from app.core.config import settings
 from app.db.models import Contact, Conversation, Inbox, Message
+from app.db.models import UserLLMConfig
+from app.inbox.llm_providers.groq import DEFAULT_GROQ_MODEL
 from app.inbox.security import decrypt_channel_config
 from app.schemas.inbox import WebhookAck
+from app.inbox.llm_providers.groq import GroqProvider
+from app.inbox.channels import send_channel_message
+from app.inbox.security import decrypt_channel_config as decrypt_user_config
 
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -182,6 +190,193 @@ async def _store_message(
     return True
 
 
+def _estimate_tokens(text: str) -> int:
+    # Rough heuristic: average English prose is about 4 chars/token.
+    return max(1, int(len(text) / 4))
+
+
+def _model_context_window(provider: str, model: str) -> int:
+    provider = (provider or "").lower()
+    model = (model or "").lower()
+
+    provider_windows = {
+        "groq": {
+            "llama-3.1-8b-instant": 131072,
+            "llama-3.3-70b-versatile": 131072,
+            "openai/gpt-oss-120b": 131072,
+            "openai/gpt-oss-20b": 131072,
+        },
+    }
+
+    if provider in provider_windows:
+        for key, window in provider_windows[provider].items():
+            if key in model:
+                return window
+
+    # sensible fallback for models we don't know yet
+    return 4096
+
+
+def _reserved_reply_tokens(provider: str, model: str) -> int:
+    provider = (provider or "").lower()
+    model = (model or "").lower()
+
+    reserve_map = {
+        "groq": {
+            "llama-3.1": 256,
+            "llama-3.3": 256,
+            "gpt-oss": 256,
+        },
+    }
+
+    if provider in reserve_map:
+        for key, reserve in reserve_map[provider].items():
+            if key in model:
+                return reserve
+
+    return 256
+
+
+async def _maybe_auto_reply(
+    session: AsyncSession,
+    conversation: Conversation,
+    contact: Contact | None,
+    inbox: Inbox,
+    incoming_text: str,
+):
+    logger.info(
+        "[auto-reply] triggered for conversation=%s channel=%s",
+        conversation.id,
+        conversation.channel_type,
+    )
+    # map conversation.channel_type to front-end channel keys
+    if conversation.channel_type == "whatsapp":
+        platform_key = "whatsapp"
+    elif conversation.channel_type == "email":
+        platform_key = "email"
+    else:
+        # facebook / instagram -> messenger
+        platform_key = "messenger"
+
+    # fetch the matching LLM config for this channel, not just the first row
+    q = select(UserLLMConfig).where(
+        UserLLMConfig.user_id == inbox.workspace_id,
+        UserLLMConfig.provider == "groq",
+    )
+    res = await session.execute(q)
+    llm_candidates = res.scalars().all()
+    llm = None
+    for candidate in llm_candidates:
+        modes = getattr(candidate, "automation_modes", {}) or {}
+        if modes.get(platform_key) == "chatbot":
+            llm = candidate
+            break
+
+    if not llm:
+        return
+
+    try:
+        user_cfg = decrypt_user_config(llm.encrypted_config)
+    except RuntimeError:
+        return
+
+    api_key = user_cfg.get("api_key")
+    if not api_key:
+        return
+
+    modes = getattr(llm, "automation_modes", {}) or {}
+
+    if modes.get(platform_key) != "chatbot":
+        return
+
+    model = llm.default_model or DEFAULT_GROQ_MODEL
+
+    async def _build_prompt(limit: int = 12) -> str:
+        # fetch recent messages for context (most recent first)
+        from sqlalchemy import select
+
+        q = (
+            select(Message)
+            .where(Message.conversation_id == conversation.id)
+            .order_by(Message.created_at.desc())
+            .limit(limit)
+        )
+        res = await session.execute(q)
+        recent = res.scalars().all()
+        # reverse to chronological
+        recent = list(reversed(recent))
+
+        system = (
+            "You are a helpful, concise assistant that replies on behalf of the support agent. "
+            "Use the conversation history for context and answer in a friendly professional tone."
+        )
+
+        header = [f"System: {system}", "Conversation:"]
+        tail = [f"User: {incoming_text.strip()}", "Assistant:"]
+        conv_turns: list[str] = []
+
+        for m in recent:
+            role = "User" if m.sender_type == "contact" else "Assistant"
+            content = (m.content or "").strip()
+            if content:
+                conv_turns.append(f"{role}: {content}")
+
+        context_window = _model_context_window(llm.provider, model)
+        reserved_reply_tokens = _reserved_reply_tokens(llm.provider, model)
+        max_prompt_tokens = max(256, context_window - reserved_reply_tokens)
+
+        def _assemble(turns: list[str]) -> str:
+            return "\n".join(header + turns + tail)
+
+        assembled = _assemble(conv_turns)
+        while conv_turns and _estimate_tokens(assembled) > max_prompt_tokens:
+            conv_turns.pop(0)
+            assembled = _assemble(conv_turns)
+
+        if _estimate_tokens(assembled) > max_prompt_tokens:
+            # trim the final user message conservatively if the conversation is still too large
+            incoming_budget = max_prompt_tokens - _estimate_tokens("\n".join(header + ["Assistant:"]))
+            incoming_budget = max(64, incoming_budget)
+            incoming_chars = incoming_budget * 4
+            trimmed_incoming = incoming_text.strip()
+            if len(trimmed_incoming) > incoming_chars:
+                trimmed_incoming = trimmed_incoming[: max(0, incoming_chars - 3)] + "..."
+            tail = [f"User: {trimmed_incoming}", "Assistant:"]
+            assembled = _assemble(conv_turns)
+
+        return assembled
+
+    prompt = await _build_prompt(limit=12)
+
+    provider = GroqProvider(api_key=api_key)
+    try:
+        reply = await provider.generate(model=model, prompt=prompt, max_tokens=300)
+    except Exception as exc:
+        logger.error("[auto-reply] Groq generate failed: %s", exc, exc_info=True)
+        return
+
+    # send reply via channel adapter
+    try:
+        channel_cfg = decrypt_channel_config(inbox.channel_config)
+        result = await send_channel_message(conversation, reply, channel_cfg, contact)
+    except Exception as exc:
+        logger.error("[auto-reply] send_channel_message failed: %s", exc, exc_info=True)
+        return
+
+    # persist outgoing message
+    out_msg = Message(
+        conversation_id=conversation.id,
+        content=reply,
+        message_type="outgoing",
+        sender_type="agent",
+        sender_id=inbox.workspace_id,
+        message_metadata={"auto_generated": True, "channel_result": result},
+    )
+    session.add(out_msg)
+    conversation.last_message_at = datetime.now(timezone.utc)
+    await session.flush()
+
+
 async def _ingest_messaging_payload(
     session: AsyncSession,
     channel_type: str,
@@ -239,6 +434,11 @@ async def _ingest_messaging_payload(
             raw_event=event,
         ):
             stats["processed"] += 1
+            # attempt auto-reply in background (await here to keep it simple)
+            try:
+                await _maybe_auto_reply(session, conversation, contact, inbox, text)
+            except Exception as exc:
+                logger.error("[auto-reply] unhandled error: %s", exc, exc_info=True)
         else:
             stats["skipped"] += 1
     return stats
@@ -316,6 +516,10 @@ async def _ingest_whatsapp_payload(
                 raw_event=value,
             ):
                 stats["processed"] += 1
+                try:
+                    await _maybe_auto_reply(session, conversation, contact, inbox, body)
+                except Exception as exc:
+                    logger.error("[auto-reply] unhandled error: %s", exc, exc_info=True)
             else:
                 stats["skipped"] += 1
     return stats

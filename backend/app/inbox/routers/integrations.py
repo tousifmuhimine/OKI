@@ -10,6 +10,7 @@ from app.inbox.channels.email import fetch_messages
 from app.inbox.security import decrypt_channel_config, encrypt_channel_config, summarize_channel_config
 from app.schemas.common import PaginationMeta
 from app.schemas.inbox import InboxCreate, InboxOut, IntegrationListResponse
+from app.schemas.inbox import InboxCreate, InboxOut, IntegrationListResponse, InboxUpdate
 
 
 router = APIRouter()
@@ -195,3 +196,34 @@ async def delete_integration(
     # Use delete statement for async SQLAlchemy
     await session.execute(delete(Inbox).where(Inbox.id == inbox_id))
     await session.commit()
+
+
+@router.patch("/{inbox_id}", response_model=InboxOut)
+async def update_integration(
+    inbox_id: str,
+    payload: InboxUpdate,
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> InboxOut:
+    inbox = await session.get(Inbox, inbox_id)
+    if not inbox or inbox.workspace_id != auth.user_id:
+        raise HTTPException(status_code=404, detail="Integration not found")
+
+    # Update name if provided
+    if payload.name is not None:
+        inbox.name = payload.name
+
+    # If channel_config provided, merge with existing decrypted config and re-encrypt
+    if payload.channel_config is not None:
+        try:
+            existing = decrypt_channel_config(inbox.channel_config)
+        except RuntimeError:
+            existing = {}
+
+        # shallow merge: provided keys overwrite existing
+        merged = {**existing, **payload.channel_config}
+        inbox.channel_config = encrypt_channel_config(merged)
+
+    await session.commit()
+    await session.refresh(inbox)
+    return _inbox_out(inbox)

@@ -1,7 +1,9 @@
 "use client";
 
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { AtSign, Cable, Camera, Mail, MessageCircle, Plus, RefreshCw, Smartphone, Trash2 } from "lucide-react";
+import { AtSign, Cable, Camera, Mail, MessageCircle, Plus, RefreshCw, Smartphone, Trash2, Zap } from "lucide-react";
 
 import { ProtectedPage } from "@/components/protected-page";
 import { apiRequest } from "@/lib/api";
@@ -138,6 +140,7 @@ const metaSandboxFixtures: Record<MetaChannelType, MetaConfigField> = {
 };
 
 export default function ChannelSettingsPage() {
+  const pathname = usePathname();
   const [integrations, setIntegrations] = useState<InboxIntegration[]>([]);
   const [channelType, setChannelType] = useState<ChannelType>("facebook");
   const [channelPreset, setChannelPreset] = useState<ChannelPreset>("live");
@@ -147,6 +150,7 @@ export default function ChannelSettingsPage() {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string>("");
 
   const selected = useMemo(() => channelOptions.find((item) => item.type === channelType) ?? channelOptions[0], [channelType]);
   const SelectedIcon = selected.icon;
@@ -278,9 +282,57 @@ export default function ChannelSettingsPage() {
     }
   }
 
+  // Get current integration being edited
+  const currentIntegration = useMemo(
+    () => integrations.find((i) => i.id === editingId),
+    [editingId, integrations]
+  );
+
+  async function updateIntegration(id: string, body: Record<string, any>) {
+    setLoading(true);
+    setError(null);
+    try {
+      await apiRequest(`/integrations/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+      setNotice("Integration updated.");
+      setEditingId("");
+      setForm({});
+      setName("");
+      await loadIntegrations();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <ProtectedPage>
       <section className="min-h-[calc(100vh-54px)] bg-transparent px-6 pb-10 pt-6">
+        <div className="mb-6 flex items-center gap-2 border-b border-white/20 dark:border-white/10">
+          <Link
+            href="/dashboard/settings/channels"
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition ${
+              pathname === "/dashboard/settings/channels"
+                ? "border-b-2 border-brand-500 text-brand-600 dark:text-brand-400"
+                : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200"
+            }`}
+          >
+            <Cable size={16} />
+            Channels
+          </Link>
+          <Link
+            href="/dashboard/settings/ai"
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition ${
+              pathname === "/dashboard/settings/ai"
+                ? "border-b-2 border-brand-500 text-brand-600 dark:text-brand-400"
+                : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200"
+            }`}
+          >
+            <Zap size={16} />
+            AI & Automation
+          </Link>
+        </div>
+
         <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-brand-500 dark:text-brand-400">Settings</p>
@@ -346,6 +398,19 @@ export default function ChannelSettingsPage() {
                         >
                           <Trash2 size={16} />
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setForm({});
+                            setName(item.name);
+                            setChannelType(item.channel_type as ChannelType);
+                            setEditingId(item.id);
+                          }}
+                          aria-label="Edit channel"
+                          className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-500 transition hover:bg-brand-500/10 hover:text-brand-600 dark:text-slate-400"
+                        >
+                          <RefreshCw size={16} />
+                        </button>
                       </div>
                     </div>
                   );
@@ -360,8 +425,12 @@ export default function ChannelSettingsPage() {
                 <SelectedIcon size={18} />
               </span>
               <div>
-                <h2 className="font-semibold text-slate-900 dark:text-white">Add channel</h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400">Credentials are encrypted before storage.</p>
+                <h2 className="font-semibold text-slate-900 dark:text-white">
+                  {editingId ? `Edit "${currentIntegration?.name}"` : "Add channel"}
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {editingId ? "Update only the fields you want to change. Leave others blank to keep current values." : "Credentials are encrypted before storage."}
+                </p>
               </div>
             </div>
 
@@ -369,50 +438,54 @@ export default function ChannelSettingsPage() {
               <ChannelInstructions channelType={channelType} />
             </div>
 
-            <div className="mb-4 grid grid-cols-2 gap-2">
-              {channelOptions.map((option) => {
-                const Icon = option.icon;
-                return (
-                  <button
-                    key={option.type}
-                    type="button"
-                    onClick={() => {
-                      setChannelType(option.type);
-                      setForm({});
-                      setName("");
-                      setChannelPreset(option.type === "email" ? "live" : "sandbox");
-                      if (option.type !== "email") {
-                        applyMetaSandboxValues(option.type as MetaChannelType);
-                      }
-                    }}
-                    className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition ${channelType === option.type ? "border-brand-300 bg-brand-500/20 text-brand-700 dark:text-brand-300" : "border-white/30 bg-white/20 text-slate-600 hover:bg-white/40 dark:border-white/10 dark:bg-white/5 dark:text-slate-300"}`}
-                  >
-                    <Icon size={15} />
-                    {option.label}
-                  </button>
-                );
-              })}
-            </div>
+            {!editingId ? (
+              <>
+                <div className="mb-4 grid grid-cols-2 gap-2">
+                  {channelOptions.map((option) => {
+                    const Icon = option.icon;
+                    return (
+                      <button
+                        key={option.type}
+                        type="button"
+                        onClick={() => {
+                          setChannelType(option.type);
+                          setForm({});
+                          setName("");
+                          setChannelPreset(option.type === "email" ? "live" : "sandbox");
+                          if (option.type !== "email") {
+                            applyMetaSandboxValues(option.type as MetaChannelType);
+                          }
+                        }}
+                        className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition ${channelType === option.type ? "border-brand-300 bg-brand-500/20 text-brand-700 dark:text-brand-300" : "border-white/30 bg-white/20 text-slate-600 hover:bg-white/40 dark:border-white/10 dark:bg-white/5 dark:text-slate-300"}`}
+                      >
+                        <Icon size={15} />
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
 
-            {channelType !== "email" ? (
-              <div className="mb-4 grid gap-2 sm:grid-cols-2">
-                {metaPresetOptions.map((preset) => (
-                  <button
-                    key={preset.value}
-                    type="button"
-                    onClick={() => {
-                      setChannelPreset(preset.value);
-                      if (preset.value === "sandbox" && (channelType === "facebook" || channelType === "instagram" || channelType === "whatsapp")) {
-                        applyMetaSandboxValues(channelType);
-                      }
-                    }}
-                    className={`rounded-xl border px-3 py-3 text-left transition ${channelPreset === preset.value ? "border-brand-300 bg-brand-500/15 text-brand-800 dark:border-brand-500/40 dark:bg-brand-500/20 dark:text-brand-100" : "border-white/30 bg-white/20 text-slate-600 hover:bg-white/40 dark:border-white/10 dark:bg-white/5 dark:text-slate-300"}`}
-                  >
-                    <div className="text-sm font-semibold">{preset.label}</div>
-                    <div className="mt-1 text-xs leading-5 opacity-80">{preset.description}</div>
-                  </button>
-                ))}
-              </div>
+                {channelType !== "email" ? (
+                  <div className="mb-4 grid gap-2 sm:grid-cols-2">
+                    {metaPresetOptions.map((preset) => (
+                      <button
+                        key={preset.value}
+                        type="button"
+                        onClick={() => {
+                          setChannelPreset(preset.value);
+                          if (preset.value === "sandbox" && (channelType === "facebook" || channelType === "instagram" || channelType === "whatsapp")) {
+                            applyMetaSandboxValues(channelType);
+                          }
+                        }}
+                        className={`rounded-xl border px-3 py-3 text-left transition ${channelPreset === preset.value ? "border-brand-300 bg-brand-500/15 text-brand-800 dark:border-brand-500/40 dark:bg-brand-500/20 dark:text-brand-100" : "border-white/30 bg-white/20 text-slate-600 hover:bg-white/40 dark:border-white/10 dark:bg-white/5 dark:text-slate-300"}`}
+                      >
+                        <div className="text-sm font-semibold">{preset.label}</div>
+                        <div className="mt-1 text-xs leading-5 opacity-80">{preset.description}</div>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </>
             ) : null}
 
             <div className="space-y-3">
@@ -423,10 +496,10 @@ export default function ChannelSettingsPage() {
               {channelType === "facebook" ? (
                 <>
                   <Field label="Page access token">
-                    <input required value={form.page_access_token ?? ""} onChange={(event) => updateField("page_access_token", event.target.value)} className={fieldClass()} placeholder="Meta page access token" />
+                    <input required={!editingId} value={form.page_access_token ?? ""} onChange={(event) => updateField("page_access_token", event.target.value)} className={fieldClass()} placeholder="Meta page access token" />
                   </Field>
                   <Field label="Page ID">
-                    <input required value={form.page_id ?? ""} onChange={(event) => updateField("page_id", event.target.value)} className={fieldClass()} placeholder="Connected page ID" />
+                    <input required={!editingId} value={form.page_id ?? ""} onChange={(event) => updateField("page_id", event.target.value)} className={fieldClass()} placeholder="Connected page ID" />
                   </Field>
                 </>
               ) : null}
@@ -434,13 +507,13 @@ export default function ChannelSettingsPage() {
               {channelType === "instagram" ? (
                 <>
                   <Field label="Page access token">
-                    <input required value={form.page_access_token ?? ""} onChange={(event) => updateField("page_access_token", event.target.value)} className={fieldClass()} placeholder="Meta page access token" />
+                    <input required={!editingId} value={form.page_access_token ?? ""} onChange={(event) => updateField("page_access_token", event.target.value)} className={fieldClass()} placeholder="Meta page access token" />
                   </Field>
                   <Field label="Facebook Page ID">
-                    <input required value={form.page_id ?? ""} onChange={(event) => updateField("page_id", event.target.value)} className={fieldClass()} placeholder="Connected Facebook page ID" />
+                    <input required={!editingId} value={form.page_id ?? ""} onChange={(event) => updateField("page_id", event.target.value)} className={fieldClass()} placeholder="Connected Facebook page ID" />
                   </Field>
                   <Field label="Instagram Business Account ID">
-                    <input required value={form.instagram_business_account_id ?? ""} onChange={(event) => updateField("instagram_business_account_id", event.target.value)} className={fieldClass()} placeholder="Instagram Business Account ID" />
+                    <input required={!editingId} value={form.instagram_business_account_id ?? ""} onChange={(event) => updateField("instagram_business_account_id", event.target.value)} className={fieldClass()} placeholder="Instagram Business Account ID" />
                   </Field>
                 </>
               ) : null}
@@ -448,13 +521,13 @@ export default function ChannelSettingsPage() {
               {channelType === "whatsapp" ? (
                 <>
                   <Field label="Cloud API token">
-                    <input required value={form.api_token ?? ""} onChange={(event) => updateField("api_token", event.target.value)} className={fieldClass()} placeholder="WhatsApp Cloud API token" />
+                    <input required={!editingId} value={form.api_token ?? ""} onChange={(event) => updateField("api_token", event.target.value)} className={fieldClass()} placeholder="WhatsApp Cloud API token" />
                   </Field>
                   <Field label="Phone number ID">
-                    <input required value={form.phone_number_id ?? ""} onChange={(event) => updateField("phone_number_id", event.target.value)} className={fieldClass()} placeholder="Phone number ID" />
+                    <input required={!editingId} value={form.phone_number_id ?? ""} onChange={(event) => updateField("phone_number_id", event.target.value)} className={fieldClass()} placeholder="Phone number ID" />
                   </Field>
                   <Field label="Business account ID">
-                    <input required value={form.business_account_id ?? ""} onChange={(event) => updateField("business_account_id", event.target.value)} className={fieldClass()} placeholder="Business account ID" />
+                    <input required={!editingId} value={form.business_account_id ?? ""} onChange={(event) => updateField("business_account_id", event.target.value)} className={fieldClass()} placeholder="Business account ID" />
                   </Field>
                 </>
               ) : null}
@@ -462,7 +535,7 @@ export default function ChannelSettingsPage() {
               {channelType === "email" ? (
                 <>
                   <Field label="Mailbox provider">
-                    <select value={form.email_provider ?? ""} onChange={(event) => applyEmailPreset(event.target.value)} className={fieldClass()} required>
+                    <select value={form.email_provider ?? ""} onChange={(event) => applyEmailPreset(event.target.value)} className={fieldClass()} required={!editingId}>
                       <option value="" disabled>Select provider</option>
                       {Object.entries(emailProviderPresets).map(([key, preset]) => (
                         <option key={key} value={key}>{preset.label}</option>
@@ -476,23 +549,23 @@ export default function ChannelSettingsPage() {
                   ) : null}
                   <p className="text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Send mail</p>
                   <Field label="SMTP host">
-                    <input required value={form.smtp_host ?? ""} onChange={(event) => updateField("smtp_host", event.target.value)} className={fieldClass()} placeholder="smtp.gmail.com" />
+                    <input required={!editingId} value={form.smtp_host ?? ""} onChange={(event) => updateField("smtp_host", event.target.value)} className={fieldClass()} placeholder="smtp.gmail.com" />
                   </Field>
                   <Field label="SMTP port">
-                    <input required value={form.smtp_port ?? "587"} onChange={(event) => updateField("smtp_port", event.target.value)} className={fieldClass()} placeholder="587" type="number" />
+                    <input required={!editingId} value={form.smtp_port ?? "587"} onChange={(event) => updateField("smtp_port", event.target.value)} className={fieldClass()} placeholder="587" type="number" />
                   </Field>
                   <Field label="SMTP username">
-                    <input required value={form.smtp_username ?? ""} onChange={(event) => updateField("smtp_username", event.target.value)} className={fieldClass()} placeholder="you@company.com" />
+                    <input required={!editingId} value={form.smtp_username ?? ""} onChange={(event) => updateField("smtp_username", event.target.value)} className={fieldClass()} placeholder="you@company.com" />
                   </Field>
                   <Field label="SMTP password">
-                    <input required value={form.smtp_password ?? ""} onChange={(event) => updateField("smtp_password", event.target.value)} className={fieldClass()} placeholder="App password or mailbox password" type="password" />
+                    <input required={!editingId} value={form.smtp_password ?? ""} onChange={(event) => updateField("smtp_password", event.target.value)} className={fieldClass()} placeholder="App password or mailbox password" type="password" />
                   </Field>
                   <p className="pt-2 text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Read inbox</p>
                   <Field label="IMAP host">
-                    <input required value={form.imap_host ?? ""} onChange={(event) => updateField("imap_host", event.target.value)} className={fieldClass()} placeholder="imap.gmail.com" />
+                    <input required={!editingId} value={form.imap_host ?? ""} onChange={(event) => updateField("imap_host", event.target.value)} className={fieldClass()} placeholder="imap.gmail.com" />
                   </Field>
                   <Field label="IMAP port">
-                    <input required value={form.imap_port ?? "993"} onChange={(event) => updateField("imap_port", event.target.value)} className={fieldClass()} placeholder="993" type="number" />
+                    <input required={!editingId} value={form.imap_port ?? "993"} onChange={(event) => updateField("imap_port", event.target.value)} className={fieldClass()} placeholder="993" type="number" />
                   </Field>
                   <Field label="IMAP username">
                     <input value={form.imap_username ?? ""} onChange={(event) => updateField("imap_username", event.target.value)} className={fieldClass()} placeholder="Blank uses SMTP username" />
@@ -507,14 +580,48 @@ export default function ChannelSettingsPage() {
               ) : null}
             </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-indigo-600 py-2.5 text-sm font-semibold text-white shadow-glow-sm transition hover:from-brand-400 hover:to-indigo-500 disabled:opacity-60"
-            >
-              <Plus size={15} />
-              {loading ? "Connecting..." : "Connect channel"}
-            </button>
+            {editingId ? (
+              <div className="mt-4 flex gap-2">
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={async () => {
+                    const body: any = {};
+                    if (name) body.name = name;
+                    if (form.api_token || form.phone_number_id || form.business_account_id) {
+                      body.channel_config = {};
+                      if (form.api_token) body.channel_config.api_token = form.api_token;
+                      if (form.phone_number_id) body.channel_config.phone_number_id = form.phone_number_id;
+                      if (form.business_account_id) body.channel_config.business_account_id = form.business_account_id;
+                    }
+                    await updateIntegration(editingId, body);
+                  }}
+                  className="flex-1 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:opacity-50"
+                >
+                  {loading ? "Saving..." : "Save"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingId("");
+                    setForm({});
+                    setName("");
+                  }}
+                  className="rounded-xl border px-4 py-2 text-sm font-semibold transition hover:bg-white/5"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                type="submit"
+                disabled={loading}
+                className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-indigo-600 py-2.5 text-sm font-semibold text-white shadow-glow-sm transition hover:from-brand-400 hover:to-indigo-500 disabled:opacity-60"
+              >
+                <Plus size={15} />
+                {loading ? "Connecting..." : "Connect channel"}
+              </button>
+            )}
           </form>
         </div>
       </section>

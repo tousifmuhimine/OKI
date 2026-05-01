@@ -187,3 +187,19 @@ class Message(Base):
         DateTime(timezone=True),
         server_default=func.now(),
     )
+
+
+class UserLLMConfig(Base, TimestampMixin):
+    __tablename__ = "user_llm_configs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    workspace_id: Mapped[str] = mapped_column(String(36), index=True)
+    user_id: Mapped[str] = mapped_column(String(255), index=True)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    # encrypted blob holding credentials/config (e.g. api_key)
+    encrypted_config: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # optional per-platform model preferences, stored as JSON: {"whatsapp":"gpt-1", ...}
+    model_preferences: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # optional per-platform automation modes: {"whatsapp":"chatbot","email":"manual"}
+    automation_modes: Mapped[dict] = mapped_column(JSONB, default=dict)
+    default_model: Mapped[str] = mapped_column(String(120), nullable=True)

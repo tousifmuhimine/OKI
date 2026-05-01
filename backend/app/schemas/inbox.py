@@ -50,6 +50,11 @@ class InboxCreate(BaseModel):
     channel_config: dict[str, Any] = Field(default_factory=dict)
 
 
+class InboxUpdate(BaseModel):
+    name: str | None = None
+    channel_config: dict[str, Any] | None = None
+
+
 class IntegrationListResponse(BaseModel):
     data: list[InboxOut]
     meta: PaginationMeta
