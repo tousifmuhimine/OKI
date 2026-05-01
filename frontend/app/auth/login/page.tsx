@@ -7,6 +7,7 @@ import { Lock, LogIn, Mail, Sparkles } from "lucide-react";
 import {
   DEMO_EMAIL,
   DEMO_PASSWORD,
+  clearDemoSession,
   isDemoCredentials,
   markBrowserAuthSession,
   startDemoSession,
@@ -59,6 +60,7 @@ export default function AuthLoginPage() {
         return;
       }
 
+      clearDemoSession();
       markBrowserAuthSession();
       goToDashboard();
     } catch (loginError) {

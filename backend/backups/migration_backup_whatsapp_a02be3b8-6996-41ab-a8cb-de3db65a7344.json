@@ -1,0 +1,127 @@
+{
+  "inbox": {
+    "id": "a02be3b8-6996-41ab-a8cb-de3db65a7344",
+    "workspace_id": "dev-user",
+    "name": "Okki Clone",
+    "channel_type": "whatsapp",
+    "channel_config": {
+      "value": "gAAAAABp8fOvFXfRMil5HbOQdgUdchSuwx_iUZLER8GJU5y4aU1w3NmObM5JR_irRKpZpJ93VPfK0gh6QgV9TDd9o_8dI15ZMzPuGiVo87BEtzfWY887WOqCQPq_cE8bhPv74mY7bwoKHLvYBIvJmI5vQqraH5OMTiS4-uPOKb_5IkvtrNpVxAzQDtlQ3SqTzDxAlTa5287Axr9cUuT5eOFyF2c4PNfjkhsMPEB0PGiseqsyk1_qasUmNJVHyhyPhXZ66GZBJXqLZ2LURBX2UDhYQA54PI9VdRU22qJLFBJAtuBTdjEWqT9FkGYz9krmLNSkkZ0KCp9HIzAl8eqj7jAwmKWf7P9nhnCJ0Wr1gXGYfHBQOKg7E_k5plg65_HaoZleviQ2ECWahqc017Dm9DNkdnCaeWsDBl6itg32m5k3zUE6n4I7ezvGHUV00JHScbikBKY0JmfRSANzBdqVy8GIwjJoWjxrDfQLSl6JTtfF9tN0kAURiKxu97dTK3L4MVqdFiOegUcGqPIWRTXXtrQS4chOBlTjanogo6LqwVpm6iKgyqxRJdqNQ_rqKZTFOBag6HNoyabZJKk-sMBGXl-mSWQvowDq5Q==",
+      "encrypted": true
+    },
+    "created_at": "2026-04-29 12:03:58.814832+00:00"
+  },
+  "conversations": [
+    {
+      "id": "29cd700b-1603-4ddd-991d-3d4a295e0a2a",
+      "workspace_id": "dev-user",
+      "inbox_id": "a02be3b8-6996-41ab-a8cb-de3db65a7344",
+      "contact_id": "46b17b40-674b-4c4c-b84d-57aad0040ca1",
+      "status": "open",
+      "channel_type": "whatsapp",
+      "last_message_at": "2026-04-29 10:40:34.877716+00:00",
+      "created_at": "2026-04-29 16:40:33.934951+00:00"
+    },
+    {
+      "id": "34e053c1-e805-4c80-917f-b3bffc9f04f2",
+      "workspace_id": "dev-user",
+      "inbox_id": "a02be3b8-6996-41ab-a8cb-de3db65a7344",
+      "contact_id": "6cea8835-2a78-41c2-805d-14280367d2dd",
+      "status": "open",
+      "channel_type": "whatsapp",
+      "last_message_at": "2026-05-01 12:24:05.585403+00:00",
+      "created_at": "2026-05-01 12:22:04.713896+00:00"
+    },
+    {
+      "id": "631198da-a7d5-46cf-a778-6d321ebe6e55",
+      "workspace_id": "dev-user",
+      "inbox_id": "a02be3b8-6996-41ab-a8cb-de3db65a7344",
+      "contact_id": "06b788ff-c966-4d6d-8554-79460725c819",
+      "status": "open",
+      "channel_type": "whatsapp",
+      "last_message_at": "2026-05-01 12:38:13.429288+00:00",
+      "created_at": "2026-05-01 12:38:09.650955+00:00"
+    }
+  ],
+  "contacts": [
+    {
+      "id": "46b17b40-674b-4c4c-b84d-57aad0040ca1",
+      "workspace_id": "dev-user",
+      "name": "Routing Probe",
+      "email": null,
+      "phone": "8801999000111",
+      "avatar_url": null,
+      "channel_identifiers": {
+        "whatsapp": "8801999000111"
+      },
+      "created_at": "2026-04-29 16:40:33.934951+00:00"
+    },
+    {
+      "id": "6cea8835-2a78-41c2-805d-14280367d2dd",
+      "workspace_id": "dev-user",
+      "name": "Tousif Muhimine",
+      "email": null,
+      "phone": "8801858703758",
+      "avatar_url": null,
+      "channel_identifiers": {
+        "inbox_id": "a02be3b8-6996-41ab-a8cb-de3db65a7344",
+        "whatsapp": "8801858703758"
+      },
+      "created_at": "2026-05-01 12:22:04.713896+00:00"
+    },
+    {
+      "id": "06b788ff-c966-4d6d-8554-79460725c819",
+      "workspace_id": "dev-user",
+      "name": "Tester",
+      "email": null,
+      "phone": "15551234567",
+      "avatar_url": null,
+      "channel_identifiers": {
+        "inbox_id": "a02be3b8-6996-41ab-a8cb-de3db65a7344",
+        "whatsapp": "15551234567"
+      },
+      "created_at": "2026-05-01 12:38:09.650955+00:00"
+    }
+  ],
+  "messages": [
+    {
+      "id": "3aea37ac-8d60-4209-89e4-19ee81cb48b3",
+      "conversation_id": "29cd700b-1603-4ddd-991d-3d4a295e0a2a",
+      "content": "route probe message",
+      "message_type": "incoming",
+      "sender_type": "contact",
+      "sender_id": "46b17b40-674b-4c4c-b84d-57aad0040ca1",
+      "metadata": "MetaData()",
+      "created_at": "2026-04-29 16:40:33.934951+00:00"
+    },
+    {
+      "id": "117fed03-3412-45cd-b3d5-6a766f6fecb0",
+      "conversation_id": "34e053c1-e805-4c80-917f-b3bffc9f04f2",
+      "content": "Hello sire",
+      "message_type": "incoming",
+      "sender_type": "contact",
+      "sender_id": "6cea8835-2a78-41c2-805d-14280367d2dd",
+      "metadata": "MetaData()",
+      "created_at": "2026-05-01 12:22:04.713896+00:00"
+    },
+    {
+      "id": "10ad57c8-a4c9-48c8-94fc-0b282c75cf1a",
+      "conversation_id": "34e053c1-e805-4c80-917f-b3bffc9f04f2",
+      "content": "Hola",
+      "message_type": "incoming",
+      "sender_type": "contact",
+      "sender_id": "6cea8835-2a78-41c2-805d-14280367d2dd",
+      "metadata": "MetaData()",
+      "created_at": "2026-05-01 12:24:01.972836+00:00"
+    },
+    {
+      "id": "11d3a8b5-f0ed-4efe-a1f6-ba2dcf04de85",
+      "conversation_id": "631198da-a7d5-46cf-a778-6d321ebe6e55",
+      "content": "hello test from webhook",
+      "message_type": "incoming",
+      "sender_type": "contact",
+      "sender_id": "06b788ff-c966-4d6d-8554-79460725c819",
+      "metadata": "MetaData()",
+      "created_at": "2026-05-01 12:38:09.650955+00:00"
+    }
+  ]
+}

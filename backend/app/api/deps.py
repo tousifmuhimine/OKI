@@ -23,6 +23,28 @@ async def get_current_auth(
     token: str | None = Depends(oauth2_scheme),
     dev_workspace_id: str | None = Header(default=None, alias="X-Dev-Workspace-Id"),
 ) -> AuthContext:
+    if token:
+        try:
+            payload = await verify_supabase_token(token)
+        except AuthError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=str(exc),
+            ) from exc
+
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token payload",
+            )
+
+        return AuthContext(
+            user_id=user_id,
+            email=payload.get("email"),
+            role=payload.get("role"),
+        )
+
     if settings.allow_anon_dev and settings.debug:
         return AuthContext(user_id=dev_workspace_id or "dev-user", email="dev@local")
 
@@ -31,27 +53,6 @@ async def get_current_auth(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing Bearer token",
         )
-
-    try:
-        payload = await verify_supabase_token(token)
-    except AuthError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(exc),
-        ) from exc
-
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload",
-        )
-
-    return AuthContext(
-        user_id=user_id,
-        email=payload.get("email"),
-        role=payload.get("role"),
-    )
 
 
 def get_session_dep(session: AsyncSession = Depends(get_db_session)) -> AsyncSession:

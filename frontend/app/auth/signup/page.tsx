@@ -5,7 +5,7 @@ import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Lock, Mail, UserPlus, UserRound } from "lucide-react";
 
-import { markBrowserAuthSession } from "@/lib/demo-auth";
+import { clearDemoSession, markBrowserAuthSession } from "@/lib/demo-auth";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 
 export default function SignupPage() {
@@ -56,6 +56,7 @@ export default function SignupPage() {
 
     setLoading(false);
 
+    clearDemoSession();
     markBrowserAuthSession();
     router.push("/dashboard/settings/channels");
   }

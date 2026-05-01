@@ -7,22 +7,24 @@ async function buildHeaders(init?: HeadersInit): Promise<Headers> {
   const headers = new Headers(init);
   headers.set("Content-Type", "application/json");
 
-  if (isDemoSessionActive() || !isSupabaseConfigured()) {
-    headers.set("X-Dev-Workspace-Id", getDevWorkspaceId());
-    return headers;
+  let token: string | undefined;
+  if (isSupabaseConfigured()) {
+    try {
+      const { data } = await getSupabaseClient().auth.getSession();
+      token = data.session?.access_token;
+    } catch {
+      clearAllAuthState();
+      return headers;
+    }
   }
-
-  let data;
-  try {
-    ({ data } = await getSupabaseClient().auth.getSession());
-  } catch {
-    clearAllAuthState();
-    return headers;
-  }
-  const token = data.session?.access_token;
 
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
+    return headers;
+  }
+
+  if (!isSupabaseConfigured() || isDemoSessionActive()) {
+    headers.set("X-Dev-Workspace-Id", getDevWorkspaceId());
   }
 
   return headers;

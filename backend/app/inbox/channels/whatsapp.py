@@ -52,8 +52,18 @@ async def send_message(
     }
     headers = {"Authorization": f"Bearer {api_token}"}
 
-    async with httpx.AsyncClient(timeout=20) as client:
-        response = await client.post(url, headers=headers, json=payload)
-        response.raise_for_status()
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        try:
+            error_data = exc.response.json()
+            error_msg = error_data.get("error", {}).get("message", str(exc))
+        except Exception:
+            error_msg = f"HTTP {exc.response.status_code}: {exc.response.text}"
+        raise ValueError(f"WhatsApp API error: {error_msg}") from exc
+    except httpx.RequestError as exc:
+        raise ValueError(f"WhatsApp API request failed: {str(exc)}") from exc
 
     return {"provider": "whatsapp", "response": response.json()}
