@@ -340,9 +340,7 @@ export default function LeadsPage() {
           </button>
         </div>
 
-        <div className="mt-5 rounded-xl border border-amber-300/40 bg-amber-500/10 p-3 text-xs leading-5 text-amber-800 dark:text-amber-200">
-          Existing DB mode: notes, email address, and follow-up date are not stored yet. This platform uses the current lead fields and conversion link only.
-        </div>
+
       </div>
     );
   }
@@ -388,7 +386,11 @@ export default function LeadsPage() {
               <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Total leads</span>
               <Zap size={17} className="text-brand-500" />
             </div>
-            <p className="mt-3 text-2xl font-bold text-slate-900 dark:text-white sm:text-3xl">{analytics?.total ?? leads.length}</p>
+            <p className="mt-3 text-2xl font-bold text-slate-900 dark:text-white sm:text-3xl">
+              {analytics
+                ? analytics.total - (analytics.by_status?.lost || 0) - (analytics.by_status?.won || 0)
+                : leads.filter((l) => l.status !== "lost" && l.status !== "won").length}
+            </p>
           </div>
           <div className="glass-card p-4">
             <div className="flex items-center justify-between">
