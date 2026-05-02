@@ -21,6 +21,10 @@ import {
   Search,
   User,
   Zap,
+  X,
+  FileText,
+  Loader2,
+  BanknoteIcon,
 } from "lucide-react";
 
 import { ProtectedPage } from "@/components/protected-page";
@@ -79,6 +83,19 @@ export default function LeadsPage() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
+
+  // Budget modal state (shown before conversion)
+  const [budgetModalLeadId, setBudgetModalLeadId] = useState<string | null>(null);
+  const [budgetInput, setBudgetInput] = useState("");
+
+  // Invoice modal state (shown after conversion)
+  type InvoiceData = {
+    id: string; customer_id: string; status: string;
+    payment_status: string; total_amount: number; currency: string;
+    remark: string | null; created_at: string;
+  };
+  type ConvertResult = { customer: Customer; invoice: InvoiceData | null; opportunity_id: string | null };
+  const [invoiceModal, setInvoiceModal] = useState<ConvertResult | null>(null);
 
   const selectedLead = leads.find((lead) => lead.id === selectedId) ?? leads[0] ?? null;
 
@@ -236,12 +253,17 @@ export default function LeadsPage() {
     }
   }
 
-  async function convertLead(leadId: string) {
+  async function convertLead(leadId: string, budget?: number) {
     setSavingId(leadId);
+    setBudgetModalLeadId(null);
     try {
-      await apiRequest<Customer>(`/leads/${leadId}/convert`, { method: "POST" });
+      const result = await apiRequest<ConvertResult>(`/leads/${leadId}/convert`, {
+        method: "POST",
+        body: JSON.stringify({ budget: budget ?? 0 }),
+      });
       await loadLeads();
       setError(null);
+      setInvoiceModal(result);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -324,11 +346,15 @@ export default function LeadsPage() {
           <button
             type="button"
             disabled={savingId === selectedLead.id || Boolean(selectedLead.converted_customer_id)}
-            onClick={() => void convertLead(selectedLead.id)}
+            onClick={() => {
+              if (selectedLead.converted_customer_id) return;
+              setBudgetInput("");
+              setBudgetModalLeadId(selectedLead.id);
+            }}
             className="flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-500 text-sm font-semibold text-white transition hover:bg-emerald-600 active:scale-95 disabled:opacity-60"
           >
-            <ArrowRight size={16} />
-            {selectedLead.converted_customer_id ? "Converted" : "Convert to customer"}
+            {savingId === selectedLead.id ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
+            {selectedLead.converted_customer_id ? "Converted ✓" : "Convert to Customer"}
           </button>
           <button
             type="button"
@@ -656,6 +682,76 @@ export default function LeadsPage() {
         ) : null}
         </div>
       </section>
+
+      {budgetModalLeadId && (() => {
+        const lead = leads.find(l => l.id === budgetModalLeadId);
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/40 backdrop-blur-sm">
+            <div className="w-full max-w-sm rounded-2xl border border-white/20 bg-white/95 dark:bg-slate-900/95 shadow-2xl backdrop-blur-2xl p-6 animate-fade-up">
+              <div className="mb-5 flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">Convert to Customer</h2>
+                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{lead?.company_name}</p>
+                </div>
+                <button onClick={() => setBudgetModalLeadId(null)} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10"><X size={16} /></button>
+              </div>
+              <div className="rounded-xl bg-emerald-50/80 dark:bg-emerald-500/10 border border-emerald-200/50 dark:border-emerald-500/20 p-3 mb-4">
+                <p className="text-xs text-emerald-700 dark:text-emerald-300 leading-relaxed">
+                  This will create a <strong>Customer</strong>, an <strong>Opportunity</strong> in Discovery stage, and a <strong>draft Invoice</strong> — all linked to this lead.
+                </p>
+              </div>
+              <div className="mb-4">
+                <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  <BanknoteIcon size={12} className="inline mr-1" /> Estimated Deal Budget (BDT)
+                </label>
+                <input type="number" min="0" value={budgetInput} onChange={e => setBudgetInput(e.target.value)} placeholder="e.g. 500000" autoFocus
+                  className="h-12 w-full rounded-xl border border-slate-200 bg-white/80 px-4 text-base font-semibold text-slate-900 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-400/20 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+                <p className="mt-1 text-[11px] text-slate-400">Leave 0 if unknown. You can update later in Pipeline.</p>
+              </div>
+              <div className="flex gap-3">
+                <button type="button" onClick={() => setBudgetModalLeadId(null)} className="flex-1 h-11 rounded-xl border border-slate-200 bg-white/60 text-sm font-semibold text-slate-700 hover:bg-slate-100 dark:border-white/10 dark:bg-white/5 dark:text-slate-200">Cancel</button>
+                <button type="button" disabled={savingId === budgetModalLeadId} onClick={() => void convertLead(budgetModalLeadId, parseFloat(budgetInput) || 0)}
+                  className="flex-1 h-11 flex items-center justify-center gap-2 rounded-xl bg-emerald-500 text-sm font-semibold text-white hover:bg-emerald-600 active:scale-95 disabled:opacity-60">
+                  {savingId === budgetModalLeadId ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />} Convert Now
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {invoiceModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/40 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-white/20 bg-white/95 dark:bg-slate-900/95 shadow-2xl backdrop-blur-2xl p-6 animate-fade-up">
+            <div className="mb-5 flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 dark:bg-emerald-500/20"><CheckCircle2 size={20} className="text-emerald-600 dark:text-emerald-400" /></div>
+              <div>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white">Conversion Successful!</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Customer created and invoice generated</p>
+              </div>
+            </div>
+            <div className="rounded-xl bg-white/60 dark:bg-white/5 border border-white/30 dark:border-white/10 p-4 mb-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-2">New Customer</p>
+              <p className="font-bold text-slate-900 dark:text-white">{(invoiceModal.customer as unknown as Record<string, string>)?.company_name ?? "—"}</p>
+              <p className="text-xs text-slate-500">{(invoiceModal.customer as unknown as Record<string, string>)?.contact_person ?? ""}</p>
+            </div>
+            {invoiceModal.invoice && (
+              <div className="rounded-xl bg-brand-50/60 dark:bg-brand-500/10 border border-brand-200/50 dark:border-brand-500/20 p-4 mb-4">
+                <div className="flex items-center gap-2 mb-3"><FileText size={14} className="text-brand-600 dark:text-brand-400" /><p className="text-[11px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">Draft Invoice Created</p></div>
+                <div className="space-y-1.5 text-sm">
+                  <div className="flex justify-between"><span className="text-slate-500">Invoice ID</span><span className="font-mono text-xs font-semibold text-slate-700 dark:text-slate-200">{invoiceModal.invoice.id.slice(0, 12)}…</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Amount</span><span className="font-bold text-brand-600 dark:text-brand-400">{invoiceModal.invoice.currency} {invoiceModal.invoice.total_amount.toLocaleString()}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Payment Status</span><span className="rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">{invoiceModal.invoice.payment_status}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Pipeline Stage</span><span className="rounded-md bg-blue-100 px-2 py-0.5 text-[10px] font-bold uppercase text-blue-700 dark:bg-blue-500/20 dark:text-blue-300">Discovery</span></div>
+                </div>
+              </div>
+            )}
+            <button type="button" onClick={() => setInvoiceModal(null)} className="w-full h-11 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-indigo-600 text-sm font-semibold text-white shadow-glow-sm hover:from-brand-400 hover:to-indigo-500 active:scale-95">
+              <CheckCircle2 size={16} /> Done
+            </button>
+          </div>
+        </div>
+      )}
     </ProtectedPage>
   );
 }

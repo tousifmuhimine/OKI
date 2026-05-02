@@ -3,7 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, get_current_auth, get_session_dep
-from app.db.models import SalesOrder
+from app.db.models import Customer, SalesOrder
 from app.schemas.common import PaginationMeta
 from app.schemas.order import OrderCreate, OrderListResponse, OrderOut
 
@@ -20,7 +20,11 @@ async def list_orders(
     _: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> OrderListResponse:
-    query = select(SalesOrder)
+    # JOIN with customers to get company_name in one query
+    query = (
+        select(SalesOrder, Customer.company_name)
+        .outerjoin(Customer, SalesOrder.customer_id == Customer.id)
+    )
     count_query = select(func.count(SalesOrder.id))
 
     if status_filter:
@@ -32,11 +36,17 @@ async def list_orders(
 
     query = query.order_by(SalesOrder.updated_at.desc()).limit(limit).offset(offset)
 
-    rows = (await session.execute(query)).scalars().all()
+    result_rows = (await session.execute(query)).all()
     total = (await session.execute(count_query)).scalar_one()
 
+    order_outs = []
+    for order, company_name in result_rows:
+        out = OrderOut.model_validate(order)
+        out.customer_name = company_name
+        order_outs.append(out)
+
     return OrderListResponse(
-        data=[OrderOut.model_validate(row) for row in rows],
+        data=order_outs,
         meta=PaginationMeta(total=total, limit=limit, offset=offset),
     )
 

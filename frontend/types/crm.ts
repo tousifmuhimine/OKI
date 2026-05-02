@@ -159,3 +159,19 @@ export type EmailComposePayload = {
   inbox_id?: string;
   metadata?: Record<string, unknown>;
 };
+
+export type Opportunity = {
+  id: string;
+  customer_id: string;
+  title: string;
+  stage: string;
+  estimated_value: number;
+  currency: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type OpportunityListResponse = {
+  data: Opportunity[];
+  meta: PaginationMeta;
+};

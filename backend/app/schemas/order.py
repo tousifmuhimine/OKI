@@ -21,6 +21,7 @@ class OrderOut(BaseModel):
 
     id: str
     customer_id: str
+    customer_name: str | None = None   # joined from customers table
     handler_user_id: str | None
     status: str
     payment_status: str
