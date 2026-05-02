@@ -9,7 +9,9 @@ import {
   Star, Mail, MessageSquare, Lightbulb, TrendingUp,
   BarChart2, Infinity, Sun, Moon, Search, Bell,
   LogOut, ChevronDown, Plus, Settings, HelpCircle, PanelLeft, X,
+  Building2, User, FileText, ArrowRight, Loader2,
 } from "lucide-react";
+import { apiRequest } from "@/lib/api";
 
 import { clearAllAuthState, isDemoSessionActive } from "@/lib/demo-auth";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
@@ -34,7 +36,7 @@ const secondaryNav = [
   { label: "Mail",       icon: Mail, href: "/dashboard/mail" },
   { label: "Talk",       icon: MessageSquare, href: "/dashboard/inbox" },
   { label: "Leads",      icon: Lightbulb, href: "/leads", dot: true },
-  { label: "Pipeline",   icon: TrendingUp },
+  { label: "Pipeline",   icon: TrendingUp, href: "/pipeline" },
   { label: "Team Data",  icon: BarChart2 },
   { label: "Synergy",    icon: Infinity },
 ];
@@ -68,6 +70,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router   = useRouter();
   const isLogin  = pathname === "/login" || pathname?.startsWith("/auth");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [quickNewOpen, setQuickNewOpen] = useState(false);
+
+  // QuickNew form state
+  const [qnCompany, setQnCompany] = useState("");
+  const [qnContact, setQnContact] = useState("");
+  const [qnType, setQnType] = useState<"lead" | "customer">("lead");
+  const [qnSaving, setQnSaving] = useState(false);
+  const [qnError, setQnError] = useState<string | null>(null);
+  const [qnSuccess, setQnSuccess] = useState(false);
 
   useEffect(() => {
     setMobileMenuOpen(false);
@@ -236,6 +247,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <button
             id="header-new-btn"
             type="button"
+            onClick={() => { setQnCompany(""); setQnContact(""); setQnType("lead"); setQnError(null); setQnSuccess(false); setQuickNewOpen(true); }}
             className="mr-1 hidden h-9 items-center gap-1.5 rounded-xl bg-gradient-to-r from-brand-500 to-indigo-600 px-3 text-sm font-semibold text-white shadow-glow-sm transition hover:from-brand-400 hover:to-indigo-500 active:scale-95 sm:flex sm:mr-2 sm:px-3.5"
           >
             <Plus size={13} />
@@ -425,6 +437,80 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           })}
         </div>
       </nav>
+
+      {/* ─── Quick New Modal ──────────────────────────────────── */}
+      {quickNewOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/40 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-white/20 bg-white/95 dark:bg-slate-900/95 shadow-2xl backdrop-blur-2xl p-6 animate-fade-up">
+            {qnSuccess ? (
+              <div className="flex flex-col items-center gap-4 py-6 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-100 dark:bg-emerald-500/20">
+                  <ArrowRight size={24} className="text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white">{qnType === "lead" ? "Lead Created!" : "Customer Created!"}</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">{qnCompany} has been added successfully.</p>
+                <div className="flex gap-3 w-full">
+                  <button type="button" onClick={() => { setQuickNewOpen(false); router.push(qnType === "lead" ? "/leads" : "/customers"); }} className="flex-1 h-11 rounded-xl bg-gradient-to-r from-brand-500 to-indigo-600 text-sm font-semibold text-white shadow-glow-sm hover:from-brand-400 hover:to-indigo-500">
+                    View {qnType === "lead" ? "Leads" : "Customers"}
+                  </button>
+                  <button type="button" onClick={() => setQuickNewOpen(false)} className="flex-1 h-11 rounded-xl border border-slate-200 bg-white/60 text-sm font-semibold text-slate-700 hover:bg-slate-100 dark:border-white/10 dark:bg-white/5 dark:text-slate-200">Close</button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="mb-5 flex items-center justify-between">
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">Quick Create</h2>
+                  <button onClick={() => setQuickNewOpen(false)} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10"><X size={16} /></button>
+                </div>
+                <div className="mb-4 flex gap-2">
+                  {([
+                    { key: "lead" as const, label: "New Lead", Icon: Zap },
+                    { key: "customer" as const, label: "New Customer", Icon: Users },
+                  ]).map(opt => (
+                    <button key={opt.key} type="button" onClick={() => setQnType(opt.key)}
+                      className={`flex flex-1 items-center gap-2 rounded-xl border p-3 text-sm font-semibold transition ${qnType === opt.key ? "border-brand-300/60 bg-brand-50/80 text-brand-700 dark:border-brand-500/30 dark:bg-brand-500/15 dark:text-brand-300" : "border-slate-200 bg-white/40 text-slate-600 hover:bg-white/70 dark:border-white/10 dark:bg-white/5 dark:text-slate-300"}`}>
+                      <opt.Icon size={16} />{opt.label}
+                    </button>
+                  ))}
+                </div>
+                {qnError && <p className="mb-3 rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-xs text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300">{qnError}</p>}
+                <form onSubmit={async e => {
+                  e.preventDefault();
+                  if (!qnCompany.trim()) return;
+                  setQnSaving(true); setQnError(null);
+                  try {
+                    if (qnType === "lead") {
+                      await apiRequest("/leads", { method: "POST", body: JSON.stringify({ company_name: qnCompany, contact_person: qnContact || null, source: "manual", status: "new" }) });
+                    } else {
+                      await apiRequest("/customers", { method: "POST", body: JSON.stringify({ company_name: qnCompany, contact_person: qnContact || null, stage: "new" }) });
+                    }
+                    setQnSuccess(true);
+                  } catch (err) { setQnError((err as Error).message); } finally { setQnSaving(false); }
+                }} className="space-y-3">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300"><Building2 size={12} className="inline mr-1" />Company / Name *</label>
+                    <input required value={qnCompany} onChange={e => setQnCompany(e.target.value)} placeholder={qnType === "lead" ? "Company or prospect name" : "Company name"} autoFocus
+                      className="h-11 w-full rounded-xl border border-slate-200 bg-white/80 px-3 text-sm text-slate-900 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-400/20 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300"><User size={12} className="inline mr-1" />Contact Person</label>
+                    <input value={qnContact} onChange={e => setQnContact(e.target.value)} placeholder="Full name or email"
+                      className="h-11 w-full rounded-xl border border-slate-200 bg-white/80 px-3 text-sm text-slate-900 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-400/20 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+                  </div>
+                  <div className="flex gap-3 pt-1">
+                    <button type="button" onClick={() => setQuickNewOpen(false)} className="flex-1 h-11 rounded-xl border border-slate-200 bg-white/60 text-sm font-semibold text-slate-700 hover:bg-slate-100 dark:border-white/10 dark:bg-white/5 dark:text-slate-200">Cancel</button>
+                    <button type="submit" disabled={qnSaving || !qnCompany.trim()}
+                      className="flex-1 h-11 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-indigo-600 text-sm font-semibold text-white shadow-glow-sm hover:from-brand-400 hover:to-indigo-500 active:scale-95 disabled:opacity-60">
+                      {qnSaving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+                      {qnSaving ? "Creating…" : `Create ${qnType === "lead" ? "Lead" : "Customer"}`}
+                    </button>
+                  </div>
+                </form>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

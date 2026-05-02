@@ -49,6 +49,10 @@ class LeadListResponse(BaseModel):
     meta: PaginationMeta
 
 
+class LeadConvertPayload(BaseModel):
+    budget: float | None = None  # estimated deal value in BDT
+
+
 class LeadAnalyticsSummary(BaseModel):
     total: int
     by_status: dict[str, int]

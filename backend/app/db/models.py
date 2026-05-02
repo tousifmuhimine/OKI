@@ -225,3 +225,29 @@ class UserLLMConfig(Base, TimestampMixin):
     # optional per-platform automation modes: {"whatsapp":"chatbot","email":"manual"}
     automation_modes: Mapped[dict] = mapped_column(JSONB, default=dict)
     default_model: Mapped[str] = mapped_column(String(120), nullable=True)
+
+
+class Task(Base, TimestampMixin):
+    __tablename__ = "tasks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    entity_type: Mapped[str] = mapped_column(String(64), index=True)  # 'lead', 'opportunity', 'customer'
+    entity_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
+    assigned_user_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str] = mapped_column(Text, nullable=True)
+    due_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    priority: Mapped[str] = mapped_column(String(32), default="medium")
+
+
+class AuditLog(Base, TimestampMixin):
+    __tablename__ = "audit_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    entity_type: Mapped[str] = mapped_column(String(64), index=True)  # 'lead', 'opportunity', 'customer'
+    entity_id: Mapped[str] = mapped_column(String(36), index=True)
+    action: Mapped[str] = mapped_column(String(120), index=True) # e.g., 'stage_changed', 'status_updated'
+    previous_value: Mapped[dict] = mapped_column(JSONB, nullable=True)
+    new_value: Mapped[dict] = mapped_column(JSONB, nullable=True)
+    performed_by_user_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)

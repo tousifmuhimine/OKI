@@ -1,14 +1,16 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { ShoppingCart, Plus, Hash, DollarSign } from "lucide-react";
+import { ShoppingCart, Plus, Hash, DollarSign, Building2 } from "lucide-react";
 
 import { ProtectedPage } from "@/components/protected-page";
 import { apiRequest } from "@/lib/api";
 import { Order, OrderListResponse } from "@/types/crm";
 
+type OrderWithCustomer = Order & { customer_name?: string | null };
+
 export default function OrdersPage() {
-  const [orders, setOrders]           = useState<Order[]>([]);
+  const [orders, setOrders]           = useState<OrderWithCustomer[]>([]);
   const [customerId, setCustomerId]   = useState("");
   const [totalAmount, setTotalAmount] = useState("");
   const [error, setError]             = useState<string | null>(null);
@@ -17,7 +19,7 @@ export default function OrdersPage() {
   async function loadOrders() {
     try {
       const response = await apiRequest<OrderListResponse>("/orders?limit=50&offset=0");
-      setOrders(response.data);
+      setOrders(response.data as OrderWithCustomer[]);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -83,13 +85,13 @@ export default function OrdersPage() {
           className="mb-6 grid animate-fade-in gap-3 glass-card p-5 sm:grid-cols-3"
         >
           <div className="relative">
-            <Hash size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400" />
+            <Building2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400" />
             <input
               required
               value={customerId}
               onChange={(e) => setCustomerId(e.target.value)}
               className="w-full rounded-xl border border-white/50 bg-white/50 dark:border-white/10 dark:bg-black/20 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-brand-400 focus:bg-white/80 focus:ring-2 focus:ring-brand-400/20 dark:text-white dark:focus:border-brand-500 dark:focus:bg-white/10"
-              placeholder="Customer ID"
+              placeholder="Customer ID (paste from Customers page)"
             />
           </div>
           <div className="relative">
@@ -125,17 +127,31 @@ export default function OrdersPage() {
             <thead>
               <tr className="border-b border-white/20 bg-white/20 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-400">
                 <th className="px-5 py-3.5">Order ID</th>
-                <th className="px-5 py-3.5">Customer ID</th>
+                <th className="px-5 py-3.5">Customer</th>
                 <th className="px-5 py-3.5">Status</th>
                 <th className="px-5 py-3.5">Payment</th>
                 <th className="px-5 py-3.5 text-right">Total</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/20 dark:divide-white/10">
-              {orders.map((order) => (
+              {(orders ?? []).map((order) => (
                 <tr key={order.id} className="group transition hover:bg-white/40 dark:hover:bg-white/10">
-                  <td className="px-5 py-3.5 font-mono text-xs text-slate-500 dark:text-slate-400">{order.id}</td>
-                  <td className="px-5 py-3.5 text-sm text-slate-700 dark:text-slate-200">{order.customer_id}</td>
+                  <td className="px-5 py-3.5 font-mono text-xs text-slate-500 dark:text-slate-400">{order.id.slice(0, 8)}…</td>
+                  <td className="px-5 py-3.5">
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-500/10 text-brand-600 dark:bg-brand-500/20 dark:text-brand-300">
+                        <Building2 size={13} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
+                          {(order as OrderWithCustomer).customer_name ?? "Unknown Customer"}
+                        </p>
+                        <p className="truncate font-mono text-[10px] text-slate-400 dark:text-slate-500">
+                          {order.customer_id.slice(0, 12)}…
+                        </p>
+                      </div>
+                    </div>
+                  </td>
                   <td className="px-5 py-3.5">
                     <span className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold ${statusBadge[order.status] ?? statusBadge["draft"]}`}>
                       {order.status}
@@ -151,7 +167,7 @@ export default function OrdersPage() {
                   </td>
                 </tr>
               ))}
-              {orders.length === 0 && (
+              {(orders ?? []).length === 0 && (
                 <tr>
                   <td className="px-5 py-12 text-center text-sm text-slate-500 dark:text-slate-400" colSpan={5}>
                     No orders yet. Add your first one above.
