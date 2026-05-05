@@ -1,10 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel
 
 from app.api.deps import AuthContext, get_current_auth, get_session_dep
-from app.db.models import Contact, Conversation, Customer, Inbox, Lead, Opportunity, SalesOrder, Task, AuditLog
 from app.services.lead_capture import upsert_lead_from_inbound_message
+from app.services.ai_convert import convert_notes_to_lead
+from app.db.models import UserLLMConfig, Contact, Conversation, Customer, Inbox, Lead, Opportunity, SalesOrder, Task, AuditLog
+from app.inbox.security import decrypt_channel_config
 from app.schemas.common import PaginationMeta
 from app.schemas.customer import CustomerOut
 from app.schemas.lead import LeadAnalyticsSummary, LeadCreate, LeadListResponse, LeadOut, LeadUpdate, LeadConvertPayload
@@ -77,6 +80,10 @@ async def get_lead_analytics_summary(
     )
 
 
+class AIConvertPayload(BaseModel):
+    raw_notes: str
+
+
 @router.post("", response_model=LeadOut, status_code=status.HTTP_201_CREATED)
 async def create_lead(
     payload: LeadCreate,
@@ -91,6 +98,50 @@ async def create_lead(
     await session.commit()
     await session.refresh(entity)
     return LeadOut.model_validate(entity)
+
+
+@router.post("/ai-convert", response_model=LeadCreate)
+async def ai_convert_notes(
+    payload: AIConvertPayload,
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> LeadCreate:
+    """
+    Convert raw agent notes into structured lead data using AI.
+    Uses the current agent's personal Groq configuration.
+    """
+    api_key = None
+    
+    # 1. Fetch the current user's Groq config
+    q = select(UserLLMConfig).where(
+        UserLLMConfig.user_id == auth.user_id,
+        UserLLMConfig.provider == "groq"
+    )
+    res = await session.execute(q)
+    config_record = res.scalar_one_or_none()
+    
+    if config_record and config_record.encrypted_config:
+        try:
+            # 2. Decrypt the user's personal API key
+            decrypted = decrypt_channel_config(config_record.encrypted_config)
+            api_key = decrypted.get("api_key")
+        except Exception:
+            pass
+            
+    if not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="Groq API Key not configured. Please add your key in Settings > AI & Automation."
+        )
+
+    # 3. Dynamic initialization with user's key
+    result = await convert_notes_to_lead(payload.raw_notes, api_key)
+    if not result:
+        raise HTTPException(
+            status_code=400,
+            detail="AI extraction failed. Please verify your API key in Settings or fill in manually.",
+        )
+    return result
 
 
 @router.get("/{lead_id}", response_model=LeadOut)

@@ -14,7 +14,6 @@ async function buildHeaders(init?: HeadersInit): Promise<Headers> {
       token = data.session?.access_token;
     } catch {
       clearAllAuthState();
-      return headers;
     }
   }
 
@@ -23,7 +22,9 @@ async function buildHeaders(init?: HeadersInit): Promise<Headers> {
     return headers;
   }
 
-  if (!isSupabaseConfigured() || isDemoSessionActive()) {
+  if (!token) {
+    // In local/dev flows we may not have a Supabase session yet.
+    // Keep requests authenticated for backend dev mode via workspace header.
     headers.set("X-Dev-Workspace-Id", getDevWorkspaceId());
   }
 

@@ -52,7 +52,16 @@ class Lead(Base, TimestampMixin):
     assigned_user_id: Mapped[str] = mapped_column(String(36), nullable=True)
     notes: Mapped[str] = mapped_column(Text, nullable=True)
     email: Mapped[str] = mapped_column(String(255), nullable=True, index=True)
+    phone: Mapped[str] = mapped_column(String(64), nullable=True, index=True)
+    address: Mapped[str] = mapped_column(Text, nullable=True)
+    industry: Mapped[str] = mapped_column(String(64), nullable=True, index=True)
     follow_up_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Dynamic industry-specific fields (Real Estate / Study Abroad / Ecommerce)
+    industry_data: Mapped[dict] = mapped_column(JSONB, nullable=True, default=None)
+    # Original agent input, preserved for auditing
+    raw_note: Mapped[str] = mapped_column(Text, nullable=True)
+    # Agent who submitted the lead (UUID reference to user table)
+    agent_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
     contact_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("contacts.id"),
@@ -251,3 +260,10 @@ class AuditLog(Base, TimestampMixin):
     previous_value: Mapped[dict] = mapped_column(JSONB, nullable=True)
     new_value: Mapped[dict] = mapped_column(JSONB, nullable=True)
     performed_by_user_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
+
+
+class Organization(Base, TimestampMixin):
+    __tablename__ = "organizations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    company_name: Mapped[str] = mapped_column(String(255), index=True)

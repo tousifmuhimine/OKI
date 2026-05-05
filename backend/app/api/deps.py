@@ -15,6 +15,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token", auto_error=False)
 @dataclass
 class AuthContext:
     user_id: str
+    org_id: str | None = None
     email: str | None = None
     role: str | None = None
 
@@ -39,14 +40,23 @@ async def get_current_auth(
                 detail="Invalid token payload",
             )
 
+        org_id = payload.get("org_id")
+        if not org_id and settings.allow_anon_dev and settings.debug:
+            org_id = "dev-org"
+
         return AuthContext(
             user_id=user_id,
+            org_id=org_id,
             email=payload.get("email"),
             role=payload.get("role"),
         )
 
     if settings.allow_anon_dev and settings.debug:
-        return AuthContext(user_id=dev_workspace_id or "dev-user", email="dev@local")
+        return AuthContext(
+            user_id=dev_workspace_id or "dev-user", 
+            org_id=dev_workspace_id or "dev-org",
+            email="dev@local"
+        )
 
     if not token:
         raise HTTPException(

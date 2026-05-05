@@ -8,12 +8,21 @@ from app.schemas.common import PaginationMeta
 class LeadBase(BaseModel):
     company_name: str = Field(min_length=2, max_length=255)
     contact_person: str | None = None
+    phone: str | None = None
+    address: str | None = None
+    industry: str | None = None
     source: str | None = None
     status: str = "new"
     assigned_user_id: str | None = None
     notes: str | None = None
     email: str | None = None
     follow_up_date: datetime | None = None
+    # Dynamic industry-specific payload
+    industry_data: dict | None = None
+    # Raw agent note for audit trail
+    raw_note: str | None = None
+    # Agent UUID who submitted this lead
+    agent_id: str | None = None
 
 
 class LeadCreate(LeadBase):
@@ -23,12 +32,18 @@ class LeadCreate(LeadBase):
 class LeadUpdate(BaseModel):
     company_name: str | None = Field(default=None, min_length=2, max_length=255)
     contact_person: str | None = None
+    phone: str | None = None
+    address: str | None = None
+    industry: str | None = None
     source: str | None = None
     status: str | None = None
     assigned_user_id: str | None = None
     notes: str | None = None
     email: str | None = None
     follow_up_date: datetime | None = None
+    industry_data: dict | None = None
+    raw_note: str | None = None
+    agent_id: str | None = None
 
 
 class LeadOut(LeadBase):

@@ -37,6 +37,9 @@ export type Lead = {
   id: string;
   company_name: string;
   contact_person: string | null;
+  phone?: string | null;
+  address?: string | null;
+  industry?: string | null;
   source: string | null;
   status: string;
   assigned_user_id: string | null;
@@ -47,6 +50,14 @@ export type Lead = {
   converted_customer_id: string | null;
   created_at: string;
   updated_at: string;
+  // Dynamic industry-specific data (Real Estate / Study Abroad / Ecommerce)
+  industry_data?: Record<string, unknown> | null;
+  // Original agent input for audit trail
+  raw_note?: string | null;
+  // Agent who submitted the lead
+  agent_id?: string | null;
+  // Email stored at lead level
+  email?: string | null;
 };
 
 export type LeadListResponse = {

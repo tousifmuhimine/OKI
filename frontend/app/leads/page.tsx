@@ -12,6 +12,7 @@ import {
   Filter,
   LayoutList,
   Mail,
+  Phone,
   Plus,
   MessageCircle,
   MessageSquare,
@@ -25,6 +26,7 @@ import {
   FileText,
   Loader2,
   BanknoteIcon,
+  ChevronDown,
 } from "lucide-react";
 
 import { ProtectedPage } from "@/components/protected-page";
@@ -77,12 +79,20 @@ export default function LeadsPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [companyName, setCompanyName] = useState("");
   const [contactPerson, setContactPerson] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [address, setAddress] = useState("");
+  const [industry, setIndustry] = useState("");
   const [source, setSource] = useState("manual");
+  const [rawNotes, setRawNotes] = useState("");
+  const [convertingNotes, setConvertingNotes] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
+  // Industry-specific data extracted by AI or entered manually
+  const [industryData, setIndustryData] = useState<Record<string, unknown> | null>(null);
 
   // Budget modal state (shown before conversion)
   const [budgetModalLeadId, setBudgetModalLeadId] = useState<string | null>(null);
@@ -96,6 +106,66 @@ export default function LeadsPage() {
   };
   type ConvertResult = { customer: Customer; invoice: InvoiceData | null; opportunity_id: string | null };
   const [invoiceModal, setInvoiceModal] = useState<ConvertResult | null>(null);
+
+  // --- CUSTOM THEMED SELECT COMPONENT ---
+  const ThemedSelect = ({
+    value,
+    onChange,
+    options,
+    placeholder,
+    icon: Icon,
+    className = ""
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    options: { value: string; label: string }[];
+    placeholder: string;
+    icon: any;
+    className?: string;
+  }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const selectedLabel = options.find(o => o.value === value)?.label || placeholder;
+
+    return (
+      <div className={`relative ${className}`}>
+        <button
+          type="button"
+          onClick={() => setIsOpen(!isOpen)}
+          className="h-11 w-full flex items-center gap-3 rounded-xl border border-white/40 bg-white/50 px-3.5 py-2 text-left text-sm text-slate-700 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-400/20 dark:border-white/10 dark:bg-black/30 dark:text-slate-200"
+        >
+          {Icon && <Icon size={15} className="text-slate-500 shrink-0" />}
+          <span className={`flex-1 truncate font-semibold ${!value ? 'text-slate-400' : ''}`}>{selectedLabel}</span>
+          <ChevronDown size={14} className={`text-brand-500/60 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+        </button>
+
+        {isOpen && (
+          <>
+            <div className="absolute left-0 right-0 top-full z-[60] mt-2 animate-scale-in overflow-hidden rounded-xl border border-white/20 bg-white/95 p-1 shadow-2xl backdrop-blur-2xl dark:border-white/10 dark:bg-slate-900/95">
+              {options.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => {
+                    onChange(opt.value);
+                    setIsOpen(false);
+                  }}
+                  className={`w-full rounded-lg px-3 py-2.5 text-left text-xs font-bold transition-all hover:bg-brand-500 hover:text-white ${
+                    value === opt.value
+                      ? 'bg-brand-500/10 text-brand-600 dark:text-brand-400'
+                      : 'text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <div className="fixed inset-0 z-50 cursor-default" onClick={() => setIsOpen(false)} />
+          </>
+        )}
+      </div>
+    );
+  };
+  // --- END CUSTOM THEMED SELECT ---
 
   const selectedLead = leads.find((lead) => lead.id === selectedId) ?? leads[0] ?? null;
 
@@ -211,6 +281,38 @@ export default function LeadsPage() {
     setDraggedLeadId(null);
   }
 
+  async function convertNotesWithAI() {
+    if (!rawNotes.trim()) {
+      setError("Please enter some notes to convert");
+      return;
+    }
+
+    setConvertingNotes(true);
+    setError(null);
+    try {
+      const result = await apiRequest<Lead & { industry_data?: Record<string, unknown> }>("/leads/ai-convert", {
+        method: "POST",
+        body: JSON.stringify({ raw_notes: rawNotes }),
+      });
+      
+      // Populate form with AI-extracted data
+      setCompanyName(result.company_name || "");
+      setContactPerson(result.contact_person || "");
+      setPhone(result.phone || "");
+      setEmail(result.email || "");
+      setAddress(result.address || "");
+      setIndustry(result.industry || "");
+      setSource(result.source || "manual");
+      // Store industry-specific data
+      setIndustryData(result.industry_data ?? null);
+      setRawNotes(""); // Clear notes after successful conversion
+    } catch (err) {
+      setError((err as Error).message || "Failed to convert notes with AI");
+    } finally {
+      setConvertingNotes(false);
+    }
+  }
+
   async function createLead(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
@@ -220,13 +322,25 @@ export default function LeadsPage() {
         body: JSON.stringify({
           company_name: companyName,
           contact_person: contactPerson || null,
+          phone: phone || null,
+          email: email || null,
+          address: address || null,
+          industry: industry || null,
           source: source || null,
           status: "new",
+          industry_data: industryData || null,
+          raw_note: rawNotes || null, // Capture manual notes if any
         }),
       });
       setCompanyName("");
       setContactPerson("");
+      setPhone("");
+      setEmail("");
+      setAddress("");
+      setIndustry("");
       setSource("manual");
+      setIndustryData(null);
+      setRawNotes("");
       setSelectedId(lead.id);
       await loadLeads();
     } catch (err) {
@@ -235,6 +349,13 @@ export default function LeadsPage() {
       setLoading(false);
     }
   }
+
+  const updateIndustryField = (key: string, value: any) => {
+    setIndustryData((prev) => ({
+      ...(prev || {}),
+      [key]: value,
+    }));
+  };
 
   async function updateLead(leadId: string, payload: Partial<Lead>) {
     setSavingId(leadId);
@@ -316,6 +437,22 @@ export default function LeadsPage() {
             <dd className="mt-1 text-slate-900 dark:text-white">{selectedLead.source ?? "Unsourced"}</dd>
           </div>
           <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Industry</dt>
+            <dd className="mt-1 capitalize text-slate-900 dark:text-white">{selectedLead.industry?.replace(/_/g, " ") ?? "—"}</dd>
+          </div>
+          {selectedLead.email && (
+            <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+              <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Email</dt>
+              <dd className="mt-1 truncate text-slate-900 dark:text-white">{selectedLead.email}</dd>
+            </div>
+          )}
+          {selectedLead.phone && (
+            <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+              <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Phone</dt>
+              <dd className="mt-1 text-slate-900 dark:text-white">{selectedLead.phone}</dd>
+            </div>
+          )}
+          <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
             <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Owner</dt>
             <dd className="mt-1 truncate text-slate-900 dark:text-white">{selectedLead.assigned_user_id ?? "Unassigned"}</dd>
           </div>
@@ -324,6 +461,36 @@ export default function LeadsPage() {
             <dd className="mt-1 text-slate-900 dark:text-white">{formatDate(selectedLead.created_at)}</dd>
           </div>
         </dl>
+
+        {/* Industry-specific data panel */}
+        {selectedLead.industry_data && Object.keys(selectedLead.industry_data).length > 0 && (
+          <div className="mt-4 rounded-xl border border-brand-200/40 bg-brand-50/60 p-3 dark:border-brand-500/20 dark:bg-brand-500/10">
+            <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-brand-600 dark:text-brand-400">
+              <Sparkles size={12} />
+              Industry Profile
+            </p>
+            <dl className="grid gap-2">
+              {Object.entries(selectedLead.industry_data).map(([key, value]) =>
+                value !== null && value !== undefined && String(value).trim() !== "" ? (
+                  <div key={key} className="flex items-start justify-between gap-2 text-xs">
+                    <dt className="capitalize text-slate-500 dark:text-slate-400">{key.replace(/_/g, " ")}</dt>
+                    <dd className="font-semibold text-right text-slate-800 dark:text-slate-100">{String(value)}</dd>
+                  </div>
+                ) : null
+              )}
+            </dl>
+          </div>
+        )}
+
+        {/* Raw note audit trail */}
+        {selectedLead.raw_note && (
+          <details className="mt-3 rounded-xl border border-dashed border-slate-200/60 dark:border-white/10">
+            <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
+              <FileText size={11} className="mr-1 inline" /> Raw Agent Note
+            </summary>
+            <p className="px-3 pb-3 pt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-400">{selectedLead.raw_note}</p>
+          </details>
+        )}
 
         <div className="mt-5">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Move status</p>
@@ -441,50 +608,278 @@ export default function LeadsPage() {
           </div>
         </div>
 
-        <form onSubmit={createLead} className="mb-5 grid gap-3 glass-card p-4 sm:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr_auto]">
-          <label className="relative">
-            <Building2 size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-            <input
-              required
-              value={companyName}
-              onChange={(event) => setCompanyName(event.target.value)}
-              className="h-11 w-full rounded-xl border border-white/50 bg-white/55 py-2 pl-10 pr-3 text-sm text-slate-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-400/20 dark:border-white/10 dark:bg-black/20 dark:text-white"
-              placeholder="Company name"
-            />
-          </label>
-          <label className="relative">
-            <User size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-            <input
-              value={contactPerson}
-              onChange={(event) => setContactPerson(event.target.value)}
-              className="h-11 w-full rounded-xl border border-white/50 bg-white/55 py-2 pl-10 pr-3 text-sm text-slate-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-400/20 dark:border-white/10 dark:bg-black/20 dark:text-white"
-              placeholder="Contact person or email"
-            />
-          </label>
-          <label className="relative">
-            <Globe size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
-            <select
-              value={source}
-              onChange={(event) => setSource(event.target.value)}
-              className="h-11 w-full appearance-none rounded-xl border border-white/50 bg-white/55 py-2 pl-10 pr-10 text-sm text-slate-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-400/20 dark:border-white/10 dark:bg-black/20 dark:text-white"
-            >
-              <option value="manual" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">Manual Entry</option>
-              <option value="website" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">Website Form</option>
-              <option value="outbound" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">Outbound Call</option>
-              <option value="referral" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">Referral</option>
-            </select>
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-500">
-              <svg className="h-4 w-4 fill-current" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+        <div className="mb-5 glass-card p-4">
+          <label className="mb-3 block">
+            <div className="mb-2 flex items-center gap-2">
+              <Sparkles size={15} className="text-brand-500" />
+              <span className="text-sm font-semibold text-slate-900 dark:text-white">Magic Convert (AI)</span>
+              <span className="text-xs text-slate-500">Paste raw notes and we'll extract the lead info</span>
             </div>
+            <textarea
+              value={rawNotes}
+              onChange={(event) => setRawNotes(event.target.value)}
+              placeholder="Paste agent notes, call transcripts, or chat messages here..."
+              className="h-24 w-full rounded-xl border border-white/50 bg-white/55 p-3 text-sm text-slate-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-400/20 dark:border-white/10 dark:bg-black/20 dark:text-white"
+            />
           </label>
           <button
-            type="submit"
-            disabled={loading}
-            className="flex h-11 items-center justify-center gap-2 rounded-xl bg-brand-500 px-5 text-sm font-semibold text-white shadow-glow-sm transition hover:bg-brand-600 active:scale-95 disabled:opacity-60"
+            type="button"
+            onClick={convertNotesWithAI}
+            disabled={convertingNotes || !rawNotes.trim()}
+            className="flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-purple-500 px-4 text-sm font-semibold text-white shadow-glow-sm transition hover:bg-purple-600 active:scale-95 disabled:opacity-60"
           >
-            <Plus size={16} />
-            {loading ? "Adding..." : "Add lead"}
+            <Sparkles size={16} />
+            {convertingNotes ? "Converting..." : "Magic Convert"}
           </button>
+          {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
+          {industryData && Object.keys(industryData).length > 0 && (
+            <div className="mt-3 rounded-xl border border-purple-200/50 bg-purple-50/60 p-3 dark:border-purple-500/20 dark:bg-purple-500/10">
+              <p className="mb-1.5 flex items-center gap-1 text-[11px] font-bold uppercase tracking-widest text-purple-600 dark:text-purple-400">
+                <Sparkles size={10} /> AI Extracted — Industry Data
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(industryData).map(([key, value]) =>
+                  value !== null && value !== undefined && String(value).trim() !== "" ? (
+                    <span key={key} className="rounded-lg bg-purple-100/80 px-2 py-0.5 text-[11px] font-semibold text-purple-700 dark:bg-purple-500/20 dark:text-purple-300">
+                      {key.replace(/_/g, " ")}: {String(value)}
+                    </span>
+                  ) : null
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <form onSubmit={createLead} className="mb-8 glass-card overflow-hidden">
+          {/* Form Header */}
+          <div className="border-b border-white/10 bg-white/20 px-6 py-4 dark:bg-white/5">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">Create New Lead</h3>
+          </div>
+
+          <div className="p-6">
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {/* Identity Section */}
+              <div className="space-y-4">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-brand-500">Identity</p>
+                <div className="space-y-3">
+                  <label className="relative block">
+                    <Building2 size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input
+                      required
+                      value={companyName}
+                      onChange={(event) => setCompanyName(event.target.value)}
+                      className="h-11 w-full rounded-xl border border-white/40 bg-white/50 py-2 pl-11 pr-4 text-sm text-slate-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-400/20 dark:border-white/10 dark:bg-black/30 dark:text-white"
+                      placeholder="Company Name"
+                    />
+                  </label>
+                  <label className="relative block">
+                    <User size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input
+                      value={contactPerson}
+                      onChange={(event) => setContactPerson(event.target.value)}
+                      className="h-11 w-full rounded-xl border border-white/40 bg-white/50 py-2 pl-11 pr-4 text-sm text-slate-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-400/20 dark:border-white/10 dark:bg-black/30 dark:text-white"
+                      placeholder="Contact Person"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {/* Contact Section */}
+              <div className="space-y-4">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-brand-500">Contact Info</p>
+                <div className="space-y-3">
+                  <label className="relative block">
+                    <Phone size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input
+                      value={phone}
+                      onChange={(event) => setPhone(event.target.value)}
+                      className="h-11 w-full rounded-xl border border-white/40 bg-white/50 py-2 pl-11 pr-4 text-sm text-slate-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-400/20 dark:border-white/10 dark:bg-black/30 dark:text-white"
+                      placeholder="Phone Number"
+                    />
+                  </label>
+                  <label className="relative block">
+                    <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input
+                      value={email}
+                      onChange={(event) => setEmail(event.target.value)}
+                      className="h-11 w-full rounded-xl border border-white/40 bg-white/50 py-2 pl-11 pr-4 text-sm text-slate-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-400/20 dark:border-white/10 dark:bg-black/30 dark:text-white"
+                      placeholder="Email Address"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {/* Classification Section */}
+              <div className="space-y-4">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-brand-500">Classification</p>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <ThemedSelect
+                      value={industry}
+                      onChange={setIndustry}
+                      icon={Building2}
+                      placeholder="Select Industry"
+                      options={[
+                        { value: "real_estate", label: "Real Estate" },
+                        { value: "ecommerce", label: "E-com" },
+                        { value: "agro", label: "Agro" },
+                        { value: "manufacture", label: "Manufacture" },
+                        { value: "study_abroad", label: "Study Abroad" },
+                      ]}
+                    />
+                    <ThemedSelect
+                      value={source}
+                      onChange={setSource}
+                      icon={Globe}
+                      placeholder="Source"
+                      options={[
+                        { value: "manual", label: "Manual" },
+                        { value: "website", label: "Website" },
+                        { value: "outbound", label: "Outbound" },
+                        { value: "referral", label: "Referral" },
+                      ]}
+                    />
+                  </div>
+                  <label className="relative block">
+                    <FileText size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input
+                      value={address}
+                      onChange={(event) => setAddress(event.target.value)}
+                      className="h-11 w-full rounded-xl border border-white/40 bg-white/50 py-2 pl-11 pr-4 text-sm text-slate-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-400/20 dark:border-white/10 dark:bg-black/30 dark:text-white"
+                      placeholder="Address / Location"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* Dynamic Industry Context Section */}
+            {industry && ["real_estate", "study_abroad", "ecommerce"].includes(industry) && (
+              <div className="mt-8 animate-fade-up">
+                <div className="rounded-2xl border border-brand-200/50 bg-brand-50/30 p-5 dark:border-brand-500/20 dark:bg-brand-500/5">
+                  <div className="mb-4 flex items-center gap-2">
+                    <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-brand-500 text-white">
+                      <Sparkles size={12} />
+                    </div>
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-brand-600 dark:text-brand-400">
+                      Contextual Details: {industry.replace(/_/g, " ")}
+                    </h4>
+                  </div>
+                  
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    {industry === "real_estate" && (
+                      <>
+                        <label className="relative">
+                          <BanknoteIcon size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-500/70" />
+                          <input
+                            type="number"
+                            value={(industryData?.budget as string) || ""}
+                            onChange={(e) => updateIndustryField("budget", e.target.value)}
+                            className="h-10 w-full rounded-lg border border-brand-200/50 bg-white/80 py-2 pl-9 pr-3 text-sm text-slate-900 outline-none transition focus:border-brand-400 dark:border-brand-500/20 dark:bg-black/40 dark:text-white"
+                            placeholder="Budget (BDT)"
+                          />
+                        </label>
+                        <label className="relative">
+                          <Columns3 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-500/70" />
+                          <input
+                            type="number"
+                            value={(industryData?.square_feet as string) || ""}
+                            onChange={(e) => updateIndustryField("square_feet", e.target.value)}
+                            className="h-10 w-full rounded-lg border border-brand-200/50 bg-white/80 py-2 pl-9 pr-3 text-sm text-slate-900 outline-none transition focus:border-brand-400 dark:border-brand-500/20 dark:bg-black/40 dark:text-white"
+                            placeholder="Sq. Feet"
+                          />
+                        </label>
+                      </>
+                    )}
+
+                    {industry === "study_abroad" && (
+                      <>
+                        <ThemedSelect
+                          value={(industryData?.preferred_country as string) || ""}
+                          onChange={(v) => updateIndustryField("preferred_country", v)}
+                          icon={Globe}
+                          placeholder="Country"
+                          className="h-10"
+                          options={[
+                            { value: "UK", label: "UK" },
+                            { value: "US", label: "US" },
+                            { value: "AUS", label: "AUS" },
+                            { value: "CA", label: "CA" },
+                          ]}
+                        />
+                        <label className="relative">
+                          <CircleDollarSign size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-500/70" />
+                          <input
+                            value={(industryData?.financial_status as string) || ""}
+                            onChange={(e) => updateIndustryField("financial_status", e.target.value)}
+                            className="h-10 w-full rounded-lg border border-brand-200/50 bg-white/80 py-2 pl-9 pr-3 text-sm text-slate-900 outline-none transition focus:border-brand-400 dark:border-brand-500/20 dark:bg-black/40 dark:text-white"
+                            placeholder="Financial Status"
+                          />
+                        </label>
+                      </>
+                    )}
+
+                    {industry === "ecommerce" && (
+                      <>
+                        <label className="relative">
+                          <Zap size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-500/70" />
+                          <input
+                            value={(industryData?.product_interest as string) || ""}
+                            onChange={(e) => updateIndustryField("product_interest", e.target.value)}
+                            className="h-10 w-full rounded-lg border border-brand-200/50 bg-white/80 py-2 pl-9 pr-3 text-sm text-slate-900 outline-none transition focus:border-brand-400 dark:border-brand-500/20 dark:bg-black/40 dark:text-white"
+                            placeholder="Product"
+                          />
+                        </label>
+                        <label className="relative">
+                          <Globe size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-500/70" />
+                          <input
+                            value={(industryData?.delivery_location as string) || ""}
+                            onChange={(e) => updateIndustryField("delivery_location", e.target.value)}
+                            className="h-10 w-full rounded-lg border border-brand-200/50 bg-white/80 py-2 pl-9 pr-3 text-sm text-slate-900 outline-none transition focus:border-brand-400 dark:border-brand-500/20 dark:bg-black/40 dark:text-white"
+                            placeholder="Location"
+                          />
+                        </label>
+                        <ThemedSelect
+                          value={(industryData?.urgency_level as string) || ""}
+                          onChange={(v) => updateIndustryField("urgency_level", v)}
+                          icon={Filter}
+                          placeholder="Urgency"
+                          className="h-10"
+                          options={[
+                            { value: "Low", label: "Low" },
+                            { value: "Medium", label: "Medium" },
+                            { value: "High", label: "High" },
+                          ]}
+                        />
+                        <ThemedSelect
+                          value={(industryData?.preferred_platform as string) || ""}
+                          onChange={(v) => updateIndustryField("preferred_platform", v)}
+                          icon={MessageSquare}
+                          placeholder="Platform"
+                          className="h-10"
+                          options={[
+                            { value: "Messenger", label: "Messenger" },
+                            { value: "WhatsApp", label: "WhatsApp" },
+                          ]}
+                        />
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-8 flex items-center justify-end border-t border-white/10 pt-6">
+              <button
+                type="submit"
+                disabled={loading}
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-indigo-600 px-8 text-sm font-bold text-white shadow-glow transition hover:from-brand-600 hover:to-indigo-700 active:scale-[0.98] disabled:opacity-60 sm:w-auto"
+              >
+                <Plus size={18} />
+                {loading ? "Creating Lead..." : "Create New Lead"}
+              </button>
+            </div>
+          </div>
         </form>
 
         <div className="mb-5 grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
