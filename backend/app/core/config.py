@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     channel_config_secret: str = ""
     meta_webhook_verify_token: str = ""
+    master_encryption_secret: str = ""
 
     allow_anon_dev: bool = False
 

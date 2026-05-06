@@ -30,6 +30,7 @@ interface ChatbotHealth {
   model: string | null;
 }
 
+
 interface AIConfigPayload {
   provider: AIProvider;
   api_key: string;
