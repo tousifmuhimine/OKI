@@ -53,7 +53,7 @@ async def get_current_auth(
 
     if settings.allow_anon_dev and settings.debug:
         return AuthContext(
-            user_id=dev_workspace_id or "dev-user", 
+            user_id=dev_workspace_id or "dev-user",
             org_id=dev_workspace_id or "dev-org",
             email="dev@local"
         )

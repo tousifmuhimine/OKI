@@ -19,7 +19,7 @@ async def get_my_organization(
 ) -> OrganizationOut:
     if not auth.org_id:
         raise HTTPException(status_code=403, detail="Organization not identified")
-    
+
     org = await session.get(Organization, auth.org_id)
     if not org:
         # Create organization record on the fly if it doesn't exist but org_id is in token
@@ -27,7 +27,7 @@ async def get_my_organization(
         session.add(org)
         await session.commit()
         await session.refresh(org)
-        
+
     return OrganizationOut(
         id=org.id,
         company_name=org.company_name

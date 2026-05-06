@@ -111,7 +111,7 @@ async def ai_convert_notes(
     Uses the current agent's personal Groq configuration.
     """
     api_key = None
-    
+
     # 1. Fetch the current user's Groq config
     q = select(UserLLMConfig).where(
         UserLLMConfig.user_id == auth.user_id,
@@ -119,7 +119,7 @@ async def ai_convert_notes(
     )
     res = await session.execute(q)
     config_record = res.scalar_one_or_none()
-    
+
     if config_record and config_record.encrypted_config:
         try:
             # 2. Decrypt the user's personal API key
@@ -127,7 +127,7 @@ async def ai_convert_notes(
             api_key = decrypted.get("api_key")
         except Exception:
             pass
-            
+
     if not api_key:
         raise HTTPException(
             status_code=400,

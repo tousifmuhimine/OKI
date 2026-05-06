@@ -294,7 +294,7 @@ export default function LeadsPage() {
         method: "POST",
         body: JSON.stringify({ raw_notes: rawNotes }),
       });
-      
+
       // Populate form with AI-extracted data
       setCompanyName(result.company_name || "");
       setContactPerson(result.contact_person || "");
@@ -765,7 +765,7 @@ export default function LeadsPage() {
                       Contextual Details: {industry.replace(/_/g, " ")}
                     </h4>
                   </div>
-                  
+
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                     {industry === "real_estate" && (
                       <>
