@@ -70,6 +70,11 @@ function SourceIcon({ source, className = "h-4 w-4" }: { source: string | null; 
   return <Sparkles className={className} />;
 }
 
+function compactSignal(value: string | null | undefined, fallback: string) {
+  if (!value || !String(value).trim()) return fallback;
+  return String(value).replace(/_/g, " ");
+}
+
 export default function LeadsPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [analytics, setAnalytics] = useState<LeadAnalyticsSummary | null>(null);
@@ -461,6 +466,29 @@ export default function LeadsPage() {
             <dd className="mt-1 text-slate-900 dark:text-white">{formatDate(selectedLead.created_at)}</dd>
           </div>
         </dl>
+
+        <div className="mt-4 rounded-xl border border-brand-200/40 bg-brand-50/60 p-3 dark:border-brand-500/20 dark:bg-brand-500/10">
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-brand-600 dark:text-brand-400">
+            <Sparkles size={12} />
+            Lead signals
+          </p>
+          <div className="flex flex-wrap gap-2 text-[11px] font-semibold">
+            <span className="rounded-lg bg-white/80 px-2.5 py-1 text-slate-700 dark:bg-white/10 dark:text-slate-200">
+              Intent: {compactSignal(selectedLead.intent, "Unknown")}
+            </span>
+            <span className="rounded-lg bg-white/80 px-2.5 py-1 text-slate-700 dark:bg-white/10 dark:text-slate-200">
+              Engagement: {compactSignal(selectedLead.engagement, "Unknown")}
+            </span>
+            <span className="rounded-lg bg-white/80 px-2.5 py-1 text-slate-700 dark:bg-white/10 dark:text-slate-200">
+              Trust: {compactSignal(selectedLead.trust_level, "Unknown")}
+            </span>
+            {selectedLead.last_summary ? (
+              <span className="rounded-lg bg-white/80 px-2.5 py-1 text-slate-700 dark:bg-white/10 dark:text-slate-200">
+                Summary: {selectedLead.last_summary}
+              </span>
+            ) : null}
+          </div>
+        </div>
 
         {/* Industry-specific data panel */}
         {selectedLead.industry_data && Object.keys(selectedLead.industry_data).length > 0 && (
@@ -942,6 +970,11 @@ export default function LeadsPage() {
                         >
                           <span className="block truncate text-sm font-semibold text-slate-900 dark:text-white">{lead.company_name}</span>
                           <span className="mt-1 block truncate text-xs text-slate-500 dark:text-slate-400">{lead.contact_person ?? "No contact"}</span>
+                          <span className="mt-2 flex flex-wrap gap-1.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                            <span className="rounded-full bg-white/60 px-2 py-0.5 dark:bg-white/10">{compactSignal(lead.intent, "Intent: unknown")}</span>
+                            <span className="rounded-full bg-white/60 px-2 py-0.5 dark:bg-white/10">{compactSignal(lead.engagement, "Engagement: unknown")}</span>
+                            <span className="rounded-full bg-white/60 px-2 py-0.5 dark:bg-white/10">{compactSignal(lead.trust_level, "Trust: unknown")}</span>
+                          </span>
                           <span className="mt-3 flex items-center justify-between gap-2 text-[11px] text-slate-500">
                             <span className="flex items-center gap-1.5 truncate">
                               <SourceIcon source={lead.source} className="h-3.5 w-3.5 shrink-0" />
@@ -981,6 +1014,11 @@ export default function LeadsPage() {
                         <div className="min-w-0">
                           <p className="truncate text-base font-semibold text-slate-900 dark:text-white">{lead.company_name}</p>
                           <p className="mt-1 truncate text-sm text-slate-500 dark:text-slate-400">{lead.contact_person ?? "No contact"}</p>
+                          <p className="mt-2 flex flex-wrap gap-1.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                            <span className="rounded-full bg-white/60 px-2 py-0.5 dark:bg-white/10">{compactSignal(lead.intent, "Intent: unknown")}</span>
+                            <span className="rounded-full bg-white/60 px-2 py-0.5 dark:bg-white/10">{compactSignal(lead.engagement, "Engagement: unknown")}</span>
+                            <span className="rounded-full bg-white/60 px-2 py-0.5 dark:bg-white/10">{compactSignal(lead.trust_level, "Trust: unknown")}</span>
+                          </p>
                         </div>
                         <span className={`shrink-0 rounded-lg px-2.5 py-1 text-[11px] font-semibold ${statusTone(lead.status)}`}>
                           {lead.status}

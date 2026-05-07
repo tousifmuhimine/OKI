@@ -5,6 +5,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, get_current_auth, get_session_dep
+from app.api.deps import has_permission
 from app.db.models import Task
 from app.schemas.common import PaginationMeta
 from app.schemas.task import TaskCreate, TaskListResponse, TaskOut, TaskUpdate
@@ -63,6 +64,8 @@ async def create_task(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> TaskOut:
+    if not await has_permission(session, auth.user_id, auth.user_id, "tasks.manage"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     task = Task(**payload.model_dump())
     if not task.assigned_user_id:
         task.assigned_user_id = auth.user_id
@@ -79,6 +82,8 @@ async def update_task(
     _: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> TaskOut:
+    if not await has_permission(session, auth.user_id, auth.user_id, "tasks.manage"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     task = await session.get(Task, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -95,6 +100,8 @@ async def delete_task(
     _: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> None:
+    if not await has_permission(session, auth.user_id, auth.user_id, "tasks.manage"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     task = await session.get(Task, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")

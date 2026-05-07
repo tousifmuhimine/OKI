@@ -18,8 +18,11 @@ import {
   RefreshCw,
 } from "lucide-react";
 
+import dynamic from "next/dynamic";
+
 import { ProtectedPage } from "@/components/protected-page";
 import { apiRequest } from "@/lib/api";
+import { buildWebSocketUrl } from "@/lib/websocket";
 import {
   ChannelType,
   ConversationListResponse,
@@ -28,6 +31,8 @@ import {
   InboxMessage,
   MessageListResponse,
 } from "@/types/crm";
+
+const ChatWidget = dynamic(() => import("@/components/chat-widget"), { ssr: false });
 
 const statusTabs: Array<"all" | ConversationStatus> = ["all", "open", "resolved"];
 const channels: Array<"all" | ChannelType> = ["all", "facebook", "instagram", "whatsapp", "email", "website"];
@@ -87,6 +92,7 @@ function InboxPageContent() {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
   const selected = conversations.find((item) => item.id === selectedId) ?? conversations[0] ?? null;
 
@@ -141,6 +147,68 @@ function InboxPageContent() {
     }
   }, [mobileThreadOpen, selected?.id]);
 
+  useEffect(() => {
+    const conversationId = selected?.id;
+    if (!conversationId) return;
+
+    let active = true;
+
+    void (async () => {
+      const url = await buildWebSocketUrl(`/ws/conversations/${conversationId}`);
+      if (!active) return;
+      const ws = new WebSocket(url);
+      wsRef.current = ws;
+
+      ws.addEventListener("message", (event) => {
+        try {
+          const payload = JSON.parse(event.data) as {
+            conversation_id?: string;
+            event?: string;
+            message?: InboxMessage;
+            text?: string;
+          };
+
+          if (payload.conversation_id !== conversationId) {
+            return;
+          }
+
+          if (payload.message?.id) {
+            setMessages((current) => {
+              if (current.some((item) => item.id === payload.message?.id)) return current;
+              return [...current, payload.message as InboxMessage];
+            });
+          } else if (payload.text) {
+            setMessages((current) => {
+              const synthetic = {
+                id: `ws-${Date.now()}`,
+                conversation_id: conversationId,
+                content: payload.text ?? "",
+                message_type: "outgoing",
+                sender_type: "agent",
+                sender_id: null,
+                metadata: {},
+                created_at: new Date().toISOString(),
+              } as InboxMessage;
+              return [...current, synthetic];
+            });
+          }
+
+          void loadConversations();
+        } catch {
+          // ignore malformed websocket payloads
+        }
+      });
+    })();
+
+    return () => {
+      active = false;
+      wsRef.current?.close();
+      if (wsRef.current) {
+        wsRef.current = null;
+      }
+    };
+  }, [selected?.id]);
+
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selected || !draft.trim()) return;
@@ -174,6 +242,21 @@ function InboxPageContent() {
     } finally {
       setSyncing(false);
     }
+  }
+
+  async function pauseConversation(conversationId: string) {
+    await apiRequest(`/inbox/conversations/${conversationId}/pause`, { method: "PATCH" });
+    await loadConversations();
+  }
+
+  async function resumeConversation(conversationId: string) {
+    await apiRequest(`/inbox/conversations/${conversationId}/resume`, { method: "PATCH" });
+    await loadConversations();
+  }
+
+  async function takeoverConversation(conversationId: string) {
+    await apiRequest(`/inbox/conversations/${conversationId}/takeover`, { method: "PATCH" });
+    await loadConversations();
   }
 
   const filteredConversations = useMemo(() => {
@@ -285,6 +368,10 @@ function InboxPageContent() {
                         <span className="shrink-0 text-[11px] text-slate-500">{formatTime(item.last_message_at)}</span>
                       </span>
                       <span className="mt-1 block truncate text-xs text-slate-500 dark:text-slate-400">{item.last_message_preview ?? item.inbox?.name ?? "No messages yet"}</span>
+                      <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-white/50 px-2 py-1 text-[10px] font-semibold text-slate-500 dark:bg-white/10 dark:text-slate-300">
+                        {item.is_bot_paused ? "Paused" : "Live"}
+                        {item.assigned_user_id ? " · assigned" : ""}
+                      </span>
                     </span>
                   </button>
                 ))
@@ -316,10 +403,46 @@ function InboxPageContent() {
                       <p className="truncate text-xs text-slate-500 dark:text-slate-400">{selected.inbox?.name ?? channelMeta[selected.channel_type].label} · {selected.contact?.email ?? selected.contact?.phone ?? "No contact detail"}</p>
                     </div>
                   </div>
-                  <span className="hidden items-center gap-1.5 rounded-lg bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold capitalize text-emerald-600 dark:text-emerald-300 sm:inline-flex">
-                    <CheckCircle2 size={12} />
-                    {selected.status}
-                  </span>
+                  <div className="hidden items-center gap-2 sm:flex">
+                    <span className={`rounded-lg px-2.5 py-1 text-xs font-semibold capitalize ${selected.is_bot_paused ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"}`}>
+                      {selected.is_bot_paused ? "Bot paused" : "Bot live"}
+                    </span>
+                    <span className="rounded-lg bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold capitalize text-emerald-600 dark:text-emerald-300">
+                      <CheckCircle2 size={12} className="inline-block -translate-y-px" />
+                      {selected.status}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 border-b border-white/20 bg-white/45 px-4 py-3 dark:border-white/10 dark:bg-white/5 sm:px-5">
+                  <button
+                    type="button"
+                    onClick={() => void takeoverConversation(selected.id)}
+                    className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-600"
+                  >
+                    Take over
+                  </button>
+                  {selected.is_bot_paused ? (
+                    <button
+                      type="button"
+                      onClick={() => void resumeConversation(selected.id)}
+                      className="rounded-lg border border-white/30 bg-white/50 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-white/80 dark:border-white/10 dark:bg-white/10 dark:text-slate-200"
+                    >
+                      Resume bot
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void pauseConversation(selected.id)}
+                      className="rounded-lg border border-white/30 bg-white/50 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-white/80 dark:border-white/10 dark:bg-white/10 dark:text-slate-200"
+                    >
+                      Pause bot
+                    </button>
+                  )}
+                  {selected.assigned_user_id ? (
+                    <span className="rounded-lg bg-white/50 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:bg-white/10 dark:text-slate-300">
+                      Assigned: {selected.assigned_user_id}
+                    </span>
+                  ) : null}
                 </div>
 
                 <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4 sm:px-5">
@@ -345,7 +468,14 @@ function InboxPageContent() {
                       );
                     })
                   )}
-                </div>
+                  </div>
+
+                  {/* Demo widget for website channel */}
+                  {selected.channel_type === "website" && selected.id ? (
+                    <div className="border-t border-white/20 p-4 dark:border-white/10">
+                      <ChatWidget conversationId={selected.id} />
+                    </div>
+                  ) : null}
 
                 <form onSubmit={sendMessage} className="sticky bottom-0 border-t border-white/20 bg-white/45 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/35 sm:p-4">
                   <div className="flex items-end gap-2 rounded-2xl border border-white/50 bg-white/60 p-2 dark:border-white/10 dark:bg-black/25 sm:gap-3">

@@ -23,6 +23,14 @@ class LeadBase(BaseModel):
     raw_note: str | None = None
     # Agent UUID who submitted this lead
     agent_id: str | None = None
+    # New dynamic fields (Step 2)
+    intent: str | None = None
+    engagement: str | None = None
+    trust_level: str | None = None
+    budget_min: float | None = None
+    budget_max: float | None = None
+    last_summary: str | None = None
+    assigned_agent_id: str | None = None
 
 
 class LeadCreate(LeadBase):
@@ -44,6 +52,14 @@ class LeadUpdate(BaseModel):
     industry_data: dict | None = None
     raw_note: str | None = None
     agent_id: str | None = None
+    # New dynamic fields (Step 2)
+    intent: str | None = None
+    engagement: str | None = None
+    trust_level: str | None = None
+    budget_min: float | None = None
+    budget_max: float | None = None
+    last_summary: str | None = None
+    assigned_agent_id: str | None = None
 
 
 class LeadOut(LeadBase):

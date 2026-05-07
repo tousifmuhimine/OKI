@@ -69,6 +69,8 @@ class ConversationOut(BaseModel):
     channel_type: ChannelType
     last_message_at: datetime | None
     created_at: datetime
+    is_bot_paused: bool = False
+    assigned_user_id: str | None = None
     contact: ContactOut | None = None
     inbox: InboxOut | None = None
     last_message_preview: str | None = None

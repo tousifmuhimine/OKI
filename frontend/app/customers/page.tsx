@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import Link from "next/link";
 import { Users, Plus, Building2, User, Globe } from "lucide-react";
 
 import { ProtectedPage } from "@/components/protected-page";
@@ -11,7 +12,11 @@ export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [companyName, setCompanyName]     = useState("");
   const [contactPerson, setContactPerson] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
   const [countryRegion, setCountryRegion] = useState("");
+  const [type, setType]                   = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -36,13 +41,17 @@ export default function CustomersPage() {
         body: JSON.stringify({
           company_name: companyName,
           contact_person: contactPerson || null,
+          email: email || null,
+          phone: phone || null,
+          address: address || null,
           country_region: countryRegion || null,
+          type: type || null,
           stage: "new",
           tags: {},
           score: 0,
         }),
       });
-      setCompanyName(""); setContactPerson(""); setCountryRegion("");
+      setCompanyName(""); setContactPerson(""); setEmail(""); setPhone(""); setAddress(""); setCountryRegion(""); setType(null);
       await loadCustomers();
     } catch (err) {
       setError((err as Error).message);
@@ -76,7 +85,7 @@ export default function CustomersPage() {
         {/* Add form */}
         <form
           onSubmit={createCustomer}
-          className="mb-6 grid animate-fade-in gap-3 glass-card p-5 sm:grid-cols-2 lg:grid-cols-4"
+          className="mb-6 grid animate-fade-in gap-3 glass-card p-5 sm:grid-cols-2 lg:grid-cols-5"
         >
           <div className="relative">
             <Building2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400" />
@@ -98,6 +107,33 @@ export default function CustomersPage() {
             />
           </div>
           <div className="relative">
+            <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400" />
+            <input
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full rounded-xl border border-white/50 bg-white/50 dark:border-white/10 dark:bg-black/20 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-brand-400 focus:bg-white/80 focus:ring-2 focus:ring-brand-400/20 dark:text-white dark:focus:border-brand-500 dark:focus:bg-white/10"
+              placeholder="Email"
+            />
+          </div>
+          <div className="relative">
+            <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400" />
+            <input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              className="w-full rounded-xl border border-white/50 bg-white/50 dark:border-white/10 dark:bg-black/20 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-brand-400 focus:bg-white/80 focus:ring-2 focus:ring-brand-400/20 dark:text-white dark:focus:border-brand-500 dark:focus:bg-white/10"
+              placeholder="Phone"
+            />
+          </div>
+          <div className="relative sm:col-span-2 lg:col-span-1">
+            <Globe size={14} className="absolute left-3 top-3 text-slate-500 dark:text-slate-400" />
+            <textarea
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              className="min-h-11 w-full rounded-xl border border-white/50 bg-white/50 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-brand-400 focus:bg-white/80 focus:ring-2 focus:ring-brand-400/20 dark:border-white/10 dark:bg-black/20 dark:text-white dark:focus:border-brand-500 dark:focus:bg-white/10"
+              placeholder="Address"
+            />
+          </div>
+          <div className="relative">
             <Globe size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400" />
             <input
               value={countryRegion}
@@ -106,13 +142,26 @@ export default function CustomersPage() {
               placeholder="Country / region"
             />
           </div>
+          <div className="relative">
+            <Building2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400" />
+            <select
+              value={type || ""}
+              onChange={(e) => setType(e.target.value || null)}
+              className="w-full rounded-xl border border-white/50 bg-white/50 dark:border-white/10 dark:bg-black/20 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-brand-400 focus:bg-white/80 focus:ring-2 focus:ring-brand-400/20 dark:text-white dark:focus:border-brand-500 dark:focus:bg-white/10"
+            >
+              <option value="">Select company type</option>
+              <option value="ecommerce">E-commerce</option>
+              <option value="real_estate">Real Estate</option>
+              <option value="study_abroad">Study Abroad</option>
+            </select>
+          </div>
           <button
             type="submit"
             disabled={loading}
             className="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-indigo-600 py-2.5 text-sm font-semibold text-white shadow-glow-sm transition hover:from-brand-400 hover:to-indigo-500 active:scale-95 disabled:opacity-60"
           >
             <Plus size={15} />
-            {loading ? "Adding…" : "Add customer"}
+            {loading ? "Adding…" : "Add"}
           </button>
         </form>
 
@@ -129,6 +178,7 @@ export default function CustomersPage() {
               <tr className="border-b border-white/20 bg-white/20 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-400">
                 <th className="px-5 py-3.5">Company</th>
                 <th className="px-5 py-3.5">Contact</th>
+                <th className="px-5 py-3.5">Type</th>
                 <th className="px-5 py-3.5">Region</th>
                 <th className="px-5 py-3.5">Stage</th>
               </tr>
@@ -136,8 +186,17 @@ export default function CustomersPage() {
             <tbody className="divide-y divide-white/20 dark:divide-white/10">
               {customers.map((c) => (
                 <tr key={c.id} className="group transition hover:bg-white/40 dark:hover:bg-white/10">
-                  <td className="px-5 py-3.5 font-medium text-slate-800 dark:text-slate-100">{c.company_name}</td>
+                  <td className="px-5 py-3.5 font-medium text-slate-800 dark:text-slate-100">
+                    <Link href={`/customers/${c.id}`} className="hover:text-brand-600 dark:hover:text-brand-300">
+                      {c.company_name}
+                    </Link>
+                  </td>
                   <td className="px-5 py-3.5 text-sm text-slate-600 dark:text-slate-300">{c.contact_person ?? "—"}</td>
+                  <td className="px-5 py-3.5 text-sm text-slate-600 dark:text-slate-300">
+                    <span className="inline-block rounded-lg bg-brand-100 px-2 py-1 text-xs font-medium text-brand-700 dark:bg-brand-500/20 dark:text-brand-300">
+                      {c.type?.replace(/_/g, " ").toUpperCase() ?? "—"}
+                    </span>
+                  </td>
                   <td className="px-5 py-3.5 text-sm text-slate-600 dark:text-slate-300">{c.country_region ?? "—"}</td>
                   <td className="px-5 py-3.5">
                     <span className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold ${stageBadge[c.stage] ?? stageBadge["new"]}`}>
@@ -148,7 +207,7 @@ export default function CustomersPage() {
               ))}
               {customers.length === 0 && (
                 <tr>
-                  <td className="px-5 py-12 text-center text-sm text-slate-500 dark:text-slate-400" colSpan={4}>
+                  <td className="px-5 py-12 text-center text-sm text-slate-500 dark:text-slate-400" colSpan={5}>
                     No customers yet. Add your first one above.
                   </td>
                 </tr>

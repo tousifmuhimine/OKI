@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { AtSign, Cable, Camera, Mail, MessageCircle, Plus, RefreshCw, Smartphone, Trash2, Zap } from "lucide-react";
+import { AtSign, Cable, Camera, Mail, MessageCircle, Plus, RefreshCw, Smartphone, Trash2, Zap, Shield } from "lucide-react";
 
 import { ProtectedPage } from "@/components/protected-page";
 import { apiRequest } from "@/lib/api";
@@ -330,6 +330,17 @@ export default function ChannelSettingsPage() {
           >
             <Zap size={16} />
             AI & Automation
+          </Link>
+          <Link
+            href="/dashboard/settings/permissions"
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition ${
+              pathname === "/dashboard/settings/permissions"
+                ? "border-b-2 border-brand-500 text-brand-600 dark:text-brand-400"
+                : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200"
+            }`}
+          >
+            <Shield size={16} />
+            Permissions
           </Link>
         </div>
 

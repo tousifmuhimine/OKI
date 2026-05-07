@@ -8,8 +8,7 @@ from app.api.deps import AuthContext, get_current_auth, get_session_dep
 from app.db.models import Contact, Conversation, Inbox, Message
 from app.inbox.channels import ChannelSendError, send_channel_message
 from app.inbox.channels.email import send_direct_message
-from app.inbox.security import decrypt_channel_config
-from app.inbox.security import summarize_channel_config
+from app.inbox.security import decrypt_channel_config, summarize_channel_config
 from app.schemas.common import PaginationMeta
 from app.schemas.inbox import (
     ChannelType,
@@ -99,6 +98,23 @@ def _conversation_out(
     )
 
 
+async def _broadcast_conversation_state(conversation: Conversation, event_name: str) -> None:
+    try:
+        from app.inbox.ws_hub import broadcast
+
+        await broadcast(
+            conversation.id,
+            {
+                "conversation_id": conversation.id,
+                "event": event_name,
+                "is_bot_paused": bool(getattr(conversation, "is_bot_paused", False)),
+                "assigned_user_id": getattr(conversation, "assigned_user_id", None),
+            },
+        )
+    except Exception:
+        return
+
+
 @router.get("/conversations", response_model=ConversationListResponse)
 async def list_conversations(
     status_filter: ConversationStatus | None = Query(default=None, alias="status"),
@@ -139,6 +155,61 @@ async def list_conversations(
             )
         ).scalar_one_or_none()
         data.append(_conversation_out(conversation, contact, inbox, last_message))
+
+    return ConversationListResponse(
+        data=data,
+        meta=PaginationMeta(total=total, limit=limit, offset=offset),
+    )
+
+
+@router.get("/conversations/assigned-to-me", response_model=ConversationListResponse)
+async def list_assigned_conversations(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> ConversationListResponse:
+    query = (
+        select(Conversation, Contact, Inbox)
+        .join(Contact, Contact.id == Conversation.contact_id)
+        .join(Inbox, Inbox.id == Conversation.inbox_id)
+        .where(
+            Conversation.workspace_id == auth.user_id,
+            Conversation.assigned_user_id == auth.user_id,
+        )
+        .order_by(Conversation.last_message_at.desc().nullslast())
+        .limit(limit)
+        .offset(offset)
+    )
+    count_query = select(func.count(Conversation.id)).where(
+        Conversation.workspace_id == auth.user_id,
+        Conversation.assigned_user_id == auth.user_id,
+    )
+
+    rows = (await session.execute(query)).all()
+    total = (await session.execute(count_query)).scalar_one()
+
+    data: list[ConversationOut] = []
+    for conversation, contact, inbox in rows:
+        last_message = (
+            await session.execute(
+                select(Message)
+                .where(Message.conversation_id == conversation.id)
+                .order_by(Message.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        data.append(_conversation_out(conversation, contact, inbox, last_message))
+
+    return ConversationListResponse(
+        data=data,
+        meta=PaginationMeta(total=total, limit=limit, offset=offset),
+    )
+
+
+@router.get("/conversations/{conversation_id}", response_model=ConversationOut)
+async def get_conversation(
+    conversation_id: str,
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> ConversationOut:
@@ -154,74 +225,10 @@ async def list_conversations(
         )
     ).scalar_one_or_none()
 
-    return ConversationOut(
-        id=conversation.id,
-        workspace_id=conversation.workspace_id,
-        inbox_id=conversation.inbox_id,
-        contact_id=conversation.contact_id,
-        status=conversation.status,
-        channel_type=conversation.channel_type,
-        last_message_at=conversation.last_message_at,
-        created_at=conversation.created_at,
-        contact=_contact_out(contact),
-        inbox=_inbox_out(inbox),
-        last_message_preview=last_message.content if last_message else None,
-    )
+    return _conversation_out(conversation, contact, inbox, last_message)
 
 
-@router.get("/conversations/{conversation_id}/messages", response_model=MessageListResponse)
-async def list_messages(
-    conversation_id: str,
-    limit: int = Query(default=50, ge=1, le=200),
-    offset: int = Query(default=0, ge=0),
-    auth: AuthContext = Depends(get_current_auth),
-    session: AsyncSession = Depends(get_session_dep),
-) -> MessageListResponse:
-    await _get_owned_conversation(conversation_id, auth.user_id, session)
-_conversation_out(conversation, contact, inbox, last_message
-    return MessageListResponse(
-        data=[_message_out(row) for row in rows],
-        meta=PaginationMeta(total=total, limit=limit, offset=offset),
-    )
-
-
-@router.post(
-    "/conversations/{conversation_id}/messages",
-    response_model=MessageOut,
-    status_code=status.HTTP_201_CREATED,
-)
-async def create_message(
-    conversation_id: str,
-    payload: MessageCreate,
-    auth: AuthContext = Depends(get_current_auth),
-    session: AsyncSession = Depends(get_session_dep),
-) -> MessageOut:
-    conversation = await _get_owned_conversation(conversation_id, auth.user_id, session)
-    inbox = await session.get(Inbox, conversation.inbox_id)
-    contact = await session.get(Contact, conversation.contact_id)
-    if not inbox or inbox.workspace_id != auth.user_id:
-        raise HTTPException(status_code=404, detail="Inbox not found")
-
-    channel_config = decrypt_channel_config(inbox.channel_config)
-    subject = payload.metadata.get("email_subject")
-    if conversation.channel_type == "email" and isinstance(subject, str) and subject.strip():
-        channel_config = {**channel_config, "subject": subject.strip()}
-
-    try:
-        channel_result = await send_channel_message(
-            conversation=conversation,
-            message_text=payload.content,
-            channel_config=channel_config,
-            contact=contact,
-        )
-    except (ChannelSendError, RuntimeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail="Channel provider send failed") from exc
-
-    message = Message(
-        conversation_id=conversation.id,
-        catch("/conversations/{conversation_id}/pause", response_model=ConversationOut)
+@router.patch("/conversations/{conversation_id}/pause", response_model=ConversationOut)
 async def pause_conversation(
     conversation_id: str,
     auth: AuthContext = Depends(get_current_auth),
@@ -264,66 +271,73 @@ async def takeover_conversation(
     await session.refresh(conversation)
     await _broadcast_conversation_state(conversation, "conversation.taken_over")
     return await get_conversation(conversation_id, auth, session)
-    conversation.is_bot_paused = True
 
 
-@router.get("/conversations/assigned-to-me", response_model=ConversationListResponse)
-async def list_assigned_conversations(
-    limit: int = Query(default=20, ge=1, le=100),
+@router.get("/conversations/{conversation_id}/messages", response_model=MessageListResponse)
+async def list_messages(
+    conversation_id: str,
+    limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
-) -> ConversationListResponse:
+) -> MessageListResponse:
+    await _get_owned_conversation(conversation_id, auth.user_id, session)
+
     query = (
-        select(Conversation, Contact, Inbox)
-        .join(Contact, Contact.id == Conversation.contact_id)
-        .join(Inbox, Inbox.id == Conversation.inbox_id)
-        .where(
-            Conversation.workspace_id == auth.user_id,
-            Conversation.assigned_user_id == auth.user_id,
-        )
-        .order_by(Conversation.last_message_at.desc().nullslast())
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.asc())
         .limit(limit)
         .offset(offset)
     )
-    count_query = select(func.count(Conversation.id)).where(
-        Conversation.workspace_id == auth.user_id,
-        Conversation.assigned_user_id == auth.user_id,
-    )
-    rows = (await session.execute(query)).all()
+    count_query = select(func.count(Message.id)).where(Message.conversation_id == conversation_id)
+
+    rows = (await session.execute(query)).scalars().all()
     total = (await session.execute(count_query)).scalar_one()
-    data: list[ConversationOut] = []
-    for conversation, contact, inbox in rows:
-        last_message = (
-            await session.execute(
-                select(Message)
-                .where(Message.conversation_id == conversation.id)
-                .order_by(Message.created_at.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        data.append(_conversation_out(conversation, contact, inbox, last_message))
-    return ConversationListResponse(data=data, meta=PaginationMeta(total=total, limit=limit, offset=offset))
+
+    return MessageListResponse(
+        data=[_message_out(row) for row in rows],
+        meta=PaginationMeta(total=total, limit=limit, offset=offset),
+    )
 
 
-async def _broadcast_conversation_state(conversation: Conversation, event_name: str) -> None:
+@router.post(
+    "/conversations/{conversation_id}/messages",
+    response_model=MessageOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_message(
+    conversation_id: str,
+    payload: MessageCreate,
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> MessageOut:
+    conversation = await _get_owned_conversation(conversation_id, auth.user_id, session)
+    inbox = await session.get(Inbox, conversation.inbox_id)
+    contact = await session.get(Contact, conversation.contact_id)
+    if not inbox or inbox.workspace_id != auth.user_id:
+        raise HTTPException(status_code=404, detail="Inbox not found")
+
+    channel_config = decrypt_channel_config(inbox.channel_config)
+    subject = payload.metadata.get("email_subject")
+    if conversation.channel_type == "email" and isinstance(subject, str) and subject.strip():
+        channel_config = {**channel_config, "subject": subject.strip()}
+
     try:
-        from app.inbox.ws_hub import broadcast
-
-        await broadcast(
-            conversation.id,
-            {
-                "conversation_id": conversation.id,
-                "event": event_name,
-                "is_bot_paused": bool(getattr(conversation, "is_bot_paused", False)),
-                "assigned_user_id": getattr(conversation, "assigned_user_id", None),
-            },
+        channel_result = await send_channel_message(
+            conversation=conversation,
+            message_text=payload.content,
+            channel_config=channel_config,
+            contact=contact,
         )
+    except (ChannelSendError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        logger.debug("[ws-broadcast] state update skipped for conversation=%s: %s", conversation.id, exc)
+        raise HTTPException(status_code=502, detail="Channel provider send failed") from exc
 
-
-@router.pontent=payload.content,
+    message = Message(
+        conversation_id=conversation.id,
+        content=payload.content,
         message_type="outgoing",
         sender_type="agent",
         sender_id=auth.user_id,
@@ -428,6 +442,8 @@ async def compose_email_message(
         channel_type=conversation.channel_type,
         last_message_at=conversation.last_message_at,
         created_at=conversation.created_at,
+        is_bot_paused=bool(getattr(conversation, "is_bot_paused", False)),
+        assigned_user_id=getattr(conversation, "assigned_user_id", None),
         contact=_contact_out(contact),
         inbox=_inbox_out(inbox),
         last_message_preview=message.content,

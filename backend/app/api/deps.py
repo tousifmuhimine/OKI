@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.security import AuthError, verify_supabase_token
+from app.db.models import PermissionGrant
 from app.db.session import get_db_session
 
 
@@ -67,3 +68,24 @@ async def get_current_auth(
 
 def get_session_dep(session: AsyncSession = Depends(get_db_session)) -> AsyncSession:
     return session
+
+
+async def has_permission(session: AsyncSession, workspace_id: str, user_id: str, permission_key: str) -> bool:
+    from sqlalchemy import select
+
+    query = select(PermissionGrant).where(
+        PermissionGrant.workspace_id == workspace_id,
+        PermissionGrant.user_id == user_id,
+        PermissionGrant.permission_key == permission_key,
+    )
+    result = await session.execute(query)
+    grant = result.scalar_one_or_none()
+    if grant is None:
+        return True
+    return bool(grant.is_allowed)
+
+
+async def require_permission(permission_key: str, auth: AuthContext, session: AsyncSession) -> None:
+    allowed = await has_permission(session, auth.user_id, auth.user_id, permission_key)
+    if not allowed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied")

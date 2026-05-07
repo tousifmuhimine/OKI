@@ -1,20 +1,26 @@
 from datetime import datetime, timezone
 from typing import Any, Iterable
 import asyncio
+import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session_dep
 from app.core.config import settings
-from app.db.models import Contact, Conversation, Inbox, Message
+from app.core.security import AuthError, verify_supabase_token
+from app.db.models import Contact, Conversation, Inbox, Lead, Message, AIEvent
 from app.db.models import UserLLMConfig
+from app.db.models import Task
 from app.inbox.llm_providers.groq import DEFAULT_GROQ_MODEL
 from app.inbox.security import decrypt_channel_config
 from app.services.lead_capture import upsert_lead_from_inbound_message
+from app.services.entity_extraction import detect_intent_from_message, update_lead_intent
+from app.services.intelligence import evaluate_intelligence_alerts, record_preference_history
 from app.schemas.inbox import WebhookAck
 from app.inbox.llm_providers.groq import GroqProvider
 from app.inbox.channels import send_channel_message
@@ -23,6 +29,96 @@ from app.inbox.security import decrypt_channel_config as decrypt_user_config
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def _resolve_websocket_workspace_id(websocket: WebSocket) -> str | None:
+    token = websocket.query_params.get("token")
+    workspace_id = websocket.query_params.get("workspace_id") or websocket.query_params.get("dev_workspace_id")
+
+    if token:
+        try:
+            payload = await verify_supabase_token(token)
+        except AuthError:
+            return None
+        return str(payload.get("sub") or workspace_id or "") or None
+
+    if settings.allow_anon_dev and settings.debug:
+        return str(workspace_id or "dev-user")
+
+    return None
+
+
+@router.websocket("/ws/conversations/{conversation_id}")
+async def conversation_ws(websocket: WebSocket, conversation_id: str, session: AsyncSession = Depends(get_session_dep)):
+    workspace_id = await _resolve_websocket_workspace_id(websocket)
+    if not workspace_id:
+        await websocket.close(code=4401)
+        return
+
+    conversation = await session.get(Conversation, conversation_id)
+    if not conversation or conversation.workspace_id != workspace_id:
+        await websocket.close(code=4403)
+        return
+
+    await websocket.accept()
+    from app.inbox.ws_hub import register, unregister
+
+    await register(conversation_id, websocket)
+    try:
+        while True:
+            try:
+                data = await websocket.receive_text()
+            except WebSocketDisconnect:
+                break
+
+            text = data.strip()
+            if not text or conversation.channel_type not in {"website", "api"}:
+                continue
+
+            try:
+                payload = json.loads(text)
+            except ValueError:
+                payload = None
+
+            if isinstance(payload, dict):
+                candidate = payload.get("content") or payload.get("text") or payload.get("message")
+                if isinstance(candidate, str) and candidate.strip():
+                    text = candidate.strip()
+
+            if not text:
+                continue
+
+            contact = await session.get(Contact, conversation.contact_id)
+            inbox = await session.get(Inbox, conversation.inbox_id)
+            if not contact or not inbox:
+                continue
+
+            if await _store_message(
+                session=session,
+                conversation=conversation,
+                contact=contact,
+                content=text,
+                channel_type=conversation.channel_type,
+                sender_key="widget",
+                sender_value=conversation.contact_id,
+                message_id=None,
+                raw_event={"source": "website_widget", "conversation_id": conversation.id},
+            ):
+                await upsert_lead_from_inbound_message(
+                    session,
+                    inbox=inbox,
+                    contact=contact,
+                    conversation=conversation,
+                    channel_type=conversation.channel_type,
+                    capture_source="auto",
+                )
+                try:
+                    await _maybe_auto_reply(session, conversation, contact, inbox, text)
+                except Exception as exc:
+                    logger.error("[auto-reply] unhandled error: %s", exc, exc_info=True)
+                await session.commit()
+    finally:
+        await unregister(conversation_id, websocket)
 
 
 def _iter_entries(payload: dict[str, Any]) -> Iterable[dict[str, Any]]:
@@ -146,6 +242,18 @@ async def _find_or_create_conversation(
     return conversation
 
 
+async def _get_conversation_lead(session: AsyncSession, conversation_id: str) -> Lead | None:
+    row = (
+        await session.execute(
+            select(Lead)
+            .where(Lead.conversation_id == conversation_id)
+            .order_by(Lead.updated_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return row
+
+
 async def _store_message(
     session: AsyncSession,
     conversation: Conversation,
@@ -188,6 +296,28 @@ async def _store_message(
     conversation.last_message_at = datetime.now(timezone.utc)
     session.add(message)
     await session.flush()
+
+    try:
+        from app.inbox.ws_hub import broadcast
+
+        await broadcast(
+            conversation.id,
+            {
+                "conversation_id": conversation.id,
+                "message": {
+                    "id": message.id,
+                    "content": content,
+                    "sender_type": "contact",
+                    "sender_id": contact.id,
+                    "message_type": "incoming",
+                    "created_at": conversation.last_message_at.isoformat() if conversation.last_message_at else None,
+                },
+                "event": "message.created",
+            },
+        )
+    except Exception as exc:
+        logger.debug("[ws-broadcast] skipped for conversation=%s: %s", conversation.id, exc)
+
     return True
 
 
@@ -259,6 +389,15 @@ async def _maybe_auto_reply(
         # facebook / instagram -> messenger
         platform_key = "messenger"
 
+    # Skip auto-reply if conversation is already handed over or bot paused
+    try:
+        if getattr(conversation, "is_bot_paused", False) or getattr(conversation, "assigned_user_id", None):
+            logger.info("[auto-reply] skipped: conversation is paused or assigned: %s", conversation.id)
+            return
+    except Exception:
+        # defensive: if attribute access fails, continue
+        pass
+
     # fetch the matching LLM config for this channel, not just the first row
     q = select(UserLLMConfig).where(
         UserLLMConfig.user_id == inbox.workspace_id,
@@ -292,6 +431,103 @@ async def _maybe_auto_reply(
 
     model = llm.default_model or DEFAULT_GROQ_MODEL
 
+    lead = await _get_conversation_lead(session, conversation.id)
+
+    detected_intent = None
+    try:
+        classification = await detect_intent_from_message(
+            session,
+            message=incoming_text,
+            workspace_id=inbox.workspace_id,
+            user_id=inbox.workspace_id,
+        )
+        detected_intent = classification.intent
+        if lead and detected_intent:
+            await update_lead_intent(session, lead.id, detected_intent)
+        if lead:
+            await record_preference_history(
+                session,
+                workspace_id=inbox.workspace_id,
+                lead=lead,
+                text=incoming_text,
+                detected_from="conversation",
+            )
+    except Exception as exc:
+        logger.debug("[auto-reply] intent detection skipped: %s", exc)
+
+    # simple handover heuristic: keywords and certain detected intents
+    def _should_handover(text: str, intent: str | None) -> bool:
+        if not text:
+            return False
+        t = text.lower()
+        keywords = [
+            "price",
+            "quote",
+            "booking",
+            "book",
+            "payment",
+            "pay",
+            "refund",
+            "cancel",
+            "agent",
+            "human",
+            "representative",
+            "talk to",
+            "speak to",
+            "customer service",
+        ]
+        for kw in keywords:
+            if kw in t:
+                return True
+        if intent:
+            low = intent.lower()
+            if any(x in low for x in ("purchase", "booking", "payment", "support", "handover", "human")):
+                return True
+        return False
+
+    try:
+        if _should_handover(incoming_text, detected_intent):
+            # mark conversation as paused and persist an ai_event for auditing/notification
+            conversation.is_bot_paused = True
+            task = Task(
+                entity_type="event",
+                entity_id=conversation.id,
+                assigned_user_id=conversation.assigned_user_id or inbox.workspace_id,
+                title=f"Handover needed for {contact.name if contact and contact.name else conversation.id}",
+                description=(
+                    f"Customer message triggered handover. Intent={detected_intent or 'unknown'}. "
+                    f"Conversation={conversation.id}."
+                ),
+                priority="high",
+            )
+            await evaluate_intelligence_alerts(
+                session,
+                workspace_id=inbox.workspace_id,
+                lead=lead,
+                conversation=conversation,
+                text=incoming_text,
+                intent=detected_intent,
+                source="handover_trigger",
+            )
+            event = AIEvent(
+                conversation_id=conversation.id,
+                event_type="handover_trigger",
+                payload={"reason": "heuristic", "text": incoming_text[:1000], "intent": detected_intent},
+            )
+            session.add(task)
+            session.add(event)
+            await session.flush()
+            logger.info("[auto-reply] handover triggered for conversation=%s", conversation.id)
+            return
+    except Exception as exc:
+        logger.debug("[auto-reply] handover check failed: %s", exc)
+
+    missing_fields: list[str] = []
+    if not (contact and contact.name) and not (lead and lead.contact_person):
+        missing_fields.append("name")
+    if not (lead and lead.email):
+        missing_fields.append("email")
+
     async def _build_prompt(limit: int = 12) -> str:
         # fetch recent messages for context (most recent first)
         from sqlalchemy import select
@@ -307,10 +543,19 @@ async def _maybe_auto_reply(
         # reverse to chronological
         recent = list(reversed(recent))
 
-        system = (
-            "You are a helpful, concise assistant that replies on behalf of the support agent. "
-            "Use the conversation history for context and answer in a friendly professional tone."
-        )
+        system_lines = [
+            "You are a helpful, concise sales assistant that replies on behalf of the team.",
+            "Use the conversation history for context and answer in a friendly professional tone.",
+            "If the lead's name is missing, ask for their name first.",
+            "If the lead's email is missing, ask for their email next.",
+            "If both are missing, ask for both in one short message.",
+            "Keep the response brief and ask at most one clear follow-up question.",
+        ]
+        if detected_intent:
+            system_lines.append(f"Detected intent: {detected_intent}.")
+        if missing_fields:
+            system_lines.append(f"Missing lead fields: {', '.join(missing_fields)}.")
+        system = " ".join(system_lines)
 
         header = [f"System: {system}", "Conversation:"]
         tail = [f"User: {incoming_text.strip()}", "Assistant:"]

@@ -1,3 +1,12 @@
+export type PlatformChannelAnalytics = {
+  channel_type: ChannelType;
+  active_conversations: number;
+  new_conversations: number;
+  ai_events_count: number;
+  handover_count: number;
+  converted_leads_count: number;
+};
+
 export type DashboardSummary = {
   customers: number;
   leads: number;
@@ -6,12 +15,18 @@ export type DashboardSummary = {
   orders: number;
   order_status_breakdown: Record<string, number>;
   payment_status_breakdown: Record<string, number>;
+  lead_source_breakdown: Record<string, number>;
+  converted_source_breakdown: Record<string, number>;
+  platform_analytics: PlatformChannelAnalytics[];
 };
 
 export type Customer = {
   id: string;
   company_name: string;
   contact_person: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
   country_region: string | null;
   assigned_user_id: string | null;
   stage: string;
@@ -20,8 +35,39 @@ export type Customer = {
   score: number;
   last_contact_date: string | null;
   notes: string | null;
+  type: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type CustomerPreference = {
+  field_name: string;
+  old_value: string | null;
+  new_value: string | null;
+  detected_from: string | null;
+  confidence: number;
+  detected_at: string;
+};
+
+export type CustomerLeadIntelligence = {
+  lead_id: string;
+  intent: string | null;
+  engagement: string | null;
+  trust_level: string | null;
+  budget_min: number | null;
+  budget_max: number | null;
+  last_summary: string | null;
+  updated_at: string;
+};
+
+export type CustomerProfileResponse = {
+  customer: Customer;
+  related_leads: Lead[];
+  lead_intelligence: CustomerLeadIntelligence[];
+  preference_history: CustomerPreference[];
+  conversation_count: number;
+  ai_summary: string | null;
+  trust_level: string | null;
 };
 
 export type CustomerListResponse = {
@@ -58,6 +104,14 @@ export type Lead = {
   agent_id?: string | null;
   // Email stored at lead level
   email?: string | null;
+  // New dynamic fields (Step 2)
+  intent?: string | null;
+  engagement?: string | null;
+  trust_level?: string | null;
+  budget_min?: number | null;
+  budget_max?: number | null;
+  last_summary?: string | null;
+  assigned_agent_id?: string | null;
 };
 
 export type LeadListResponse = {
@@ -106,6 +160,8 @@ export type InboxIntegration = {
   id: string;
   workspace_id: string;
   name: string;
+  is_bot_paused: boolean;
+  assigned_user_id: string | null;
   channel_type: ChannelType;
   channel_config: Record<string, unknown>;
   created_at: string;

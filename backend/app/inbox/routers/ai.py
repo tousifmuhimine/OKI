@@ -1,17 +1,68 @@
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, get_current_auth, get_session_dep
+from app.api.deps import has_permission
 from app.db.models import UserLLMConfig
 from app.inbox.llm_providers.groq import SUPPORTED_GROQ_MODELS
 from app.inbox.security import encrypt_channel_config, summarize_channel_config
 from app.schemas.llm import UserLLMConfigCreate, UserLLMConfigRead
+from app.services.ai_reply import generate_ai_reply
+from app.services.entity_extraction import (
+    extract_entities_from_message,
+    update_lead_from_extracted_entities,
+    detect_intent_from_message,
+    update_lead_intent,
+)
+from app.schemas.lead import LeadOut
 
 
 router = APIRouter()
+
+
+class GenerateReplyRequest(BaseModel):
+    """Request to generate an AI reply."""
+    message: str = Field(min_length=1, description="The customer message to reply to")
+    company_type: str | None = Field(default=None, description="Company type (ecommerce, real_estate, study_abroad)")
+
+
+class GenerateReplyResponse(BaseModel):
+    """Response with generated AI reply."""
+    reply: str = Field(description="Generated AI reply")
+    model: str = Field(description="AI model used")
+    provider: str = Field(description="AI provider used")
+
+
+class ExtractEntitiesRequest(BaseModel):
+    """Request to extract entities from a message."""
+    message: str = Field(min_length=1, description="The message to extract entities from")
+    lead_id: str | None = Field(default=None, description="Optional lead ID to update with extracted data")
+
+
+class ExtractedEntitiesResponse(BaseModel):
+    """Response with extracted entities."""
+    name: str | None = Field(default=None, description="Extracted name")
+    phone: str | None = Field(default=None, description="Extracted phone number")
+    email: str | None = Field(default=None, description="Extracted email address")
+    address: str | None = Field(default=None, description="Extracted address/location")
+    budget: float | None = Field(default=None, description="Extracted budget amount")
+    lead: LeadOut | None = Field(default=None, description="Updated lead if lead_id was provided")
+
+
+class DetectIntentRequest(BaseModel):
+    """Request to detect customer intent from a message."""
+    message: str = Field(min_length=1, description="The message to classify")
+    lead_id: str | None = Field(default=None, description="Optional lead ID to update with detected intent")
+
+
+class DetectIntentResponse(BaseModel):
+    """Response with detected intent."""
+    intent: str | None = Field(default=None, description="Detected intent: browsing, comparing, or serious")
+    lead: LeadOut | None = Field(default=None, description="Updated lead if lead_id was provided")
 
 
 def _validate_groq_models(payload: UserLLMConfigCreate) -> None:
@@ -68,6 +119,8 @@ async def upsert_config(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ):
+    if not await has_permission(session, auth.user_id, auth.user_id, "ai.settings"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     _validate_groq_models(payload)
 
     # encrypt api key and optional api_url using channel config cipher
@@ -130,6 +183,8 @@ async def delete_config(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ):
+    if not await has_permission(session, auth.user_id, auth.user_id, "ai.settings"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     q = select(UserLLMConfig).where(
         UserLLMConfig.id == config_id,
         UserLLMConfig.user_id == auth.user_id,
@@ -142,3 +197,113 @@ async def delete_config(
     await session.delete(existing)
     await session.commit()
     return {"deleted": True, "id": config_id}
+
+
+@router.post("/reply", response_model=GenerateReplyResponse)
+async def generate_reply(
+    payload: GenerateReplyRequest,
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> GenerateReplyResponse:
+    """Generate an AI reply to a customer message.
+    
+    The reply is generated using the user's configured AI provider (Groq, etc.)
+    and tailored to the company type (ecommerce, real_estate, study_abroad, etc.)
+    """
+    try:
+        reply = await generate_ai_reply(
+            session,
+            message=payload.message,
+            company_type=payload.company_type,
+            workspace_id=auth.user_id,
+            user_id=auth.user_id,
+        )
+        
+        # Get user's config to return provider info
+        q = select(UserLLMConfig).where(UserLLMConfig.user_id == auth.user_id)
+        res = await session.execute(q)
+        config = res.scalar_one_or_none()
+        
+        return GenerateReplyResponse(
+            reply=reply,
+            model=config.default_model or "llama-3.1-8b-instant" if config else "unknown",
+            provider=config.provider if config else "unknown",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate reply: {str(e)}")
+
+
+@router.post("/extract-entities", response_model=ExtractedEntitiesResponse)
+async def extract_entities(
+    payload: ExtractEntitiesRequest,
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> ExtractedEntitiesResponse:
+    """Extract structured entities (name, phone, email, address, budget) from a message.
+    
+    Optionally update a lead with the extracted data.
+    Uses the user's configured AI provider for extraction.
+    """
+    try:
+        # Extract entities from message
+        entities = await extract_entities_from_message(
+            session,
+            message=payload.message,
+            workspace_id=auth.user_id,
+            user_id=auth.user_id,
+        )
+        
+        # Update lead if lead_id provided
+        updated_lead = None
+        if payload.lead_id:
+            updated_lead = await update_lead_from_extracted_entities(
+                session,
+                payload.lead_id,
+                entities,
+            )
+            await session.commit()
+        
+        return ExtractedEntitiesResponse(
+            name=entities.name,
+            phone=entities.phone,
+            email=entities.email,
+            address=entities.address,
+            budget=entities.budget,
+            lead=LeadOut.model_validate(updated_lead) if updated_lead else None,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to extract entities: {str(e)}")
+
+
+@router.post("/detect-intent", response_model=DetectIntentResponse)
+async def detect_intent(
+    payload: DetectIntentRequest,
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> DetectIntentResponse:
+    """Detect customer intent from a message and optionally persist it to a lead."""
+    try:
+        classification = await detect_intent_from_message(
+            session,
+            message=payload.message,
+            workspace_id=auth.user_id,
+            user_id=auth.user_id,
+        )
+
+        updated_lead = None
+        if payload.lead_id and classification.intent:
+            updated_lead = await update_lead_intent(session, payload.lead_id, classification.intent)
+            await session.commit()
+
+        return DetectIntentResponse(
+            intent=classification.intent,
+            lead=LeadOut.model_validate(updated_lead) if updated_lead else None,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to detect intent: {str(e)}")

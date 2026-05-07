@@ -6,7 +6,7 @@ import {
   ChevronRight, Target, CheckSquare, MoreHorizontal,
   Clock, TrendingUp, Info, Users, ChevronDown, Zap,
   Activity, ArrowUpRight, Flame, Circle, ChevronLeft,
-  CalendarDays, AlignLeft,
+  CalendarDays, AlignLeft, MessageCircle,
 } from "lucide-react";
 
 import { ProtectedPage } from "@/components/protected-page";
@@ -126,6 +126,10 @@ function IconBtn({ icon: Icon, label, onClick }: any) {
   );
 }
 
+function formatSourceLabel(value: string) {
+  return value.replace(/_/g, " ");
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  Dashboard
 // ═══════════════════════════════════════════════════════════════
@@ -141,6 +145,17 @@ export default function DashboardPage() {
   const [now, setNow] = useState(new Date());
   const [activeTimezone, setActiveTimezone] = useState({ label: "Dhaka", tz: "Asia/Dhaka" });
   const [clockDropdownOpen, setClockDropdownOpen] = useState(false);
+  const topLeadSources = useMemo(() => {
+    return Object.entries(data?.lead_source_breakdown ?? {})
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5);
+  }, [data]);
+  const topConvertedSources = useMemo(() => {
+    return Object.entries(data?.converted_source_breakdown ?? {})
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5);
+  }, [data]);
+  const platformAnalytics = useMemo(() => data?.platform_analytics ?? [], [data]);
 
   // Calendar State
   const [events, setEvents] = useState<TaskEvent[]>([]);
@@ -430,8 +445,96 @@ export default function DashboardPage() {
             <KpiTile icon={Users}       label="Customers"       value={data?.customers ?? 0}        trend="+2 this month"      delay="200ms" />
           </div>
 
+          <BCard className="lg:col-span-12" delay="220ms">
+            <CardHead
+              title={<><Activity size={14} className="text-brand-500" /> Lead analytics</>}
+              sub="Lead volume and conversions by source"
+            />
+            <div className="grid gap-4 px-5 py-4 md:grid-cols-2">
+              <div className="rounded-2xl border border-white/30 bg-white/30 p-4 dark:border-white/10 dark:bg-white/5">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Lead sources</h3>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">{data?.leads ?? 0} total</span>
+                </div>
+                <div className="space-y-2">
+                  {topLeadSources.length === 0 ? (
+                    <p className="text-sm text-slate-500 dark:text-slate-400">No source data yet.</p>
+                  ) : topLeadSources.map(([source, count]) => {
+                    const width = data?.leads ? Math.max(8, (count / data.leads) * 100) : 0;
+                    return (
+                      <div key={source}>
+                        <div className="mb-1 flex items-center justify-between text-xs">
+                          <span className="capitalize text-slate-600 dark:text-slate-300">{formatSourceLabel(source)}</span>
+                          <span className="font-semibold text-slate-800 dark:text-slate-100">{count}</span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-white/40 dark:bg-black/20">
+                          <div className="h-full rounded-full bg-gradient-to-r from-brand-500 to-indigo-500" style={{ width: `${width}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/30 bg-white/30 p-4 dark:border-white/10 dark:bg-white/5">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Converted sources</h3>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Won leads</span>
+                </div>
+                <div className="space-y-2">
+                  {topConvertedSources.length === 0 ? (
+                    <p className="text-sm text-slate-500 dark:text-slate-400">No converted leads yet.</p>
+                  ) : topConvertedSources.map(([source, count]) => (
+                    <div key={source} className="flex items-center justify-between rounded-xl bg-white/35 px-3 py-2 dark:bg-black/20">
+                      <span className="capitalize text-sm text-slate-700 dark:text-slate-200">{formatSourceLabel(source)}</span>
+                      <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300">{count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </BCard>
+
+          <BCard className="lg:col-span-12" delay="240ms">
+            <CardHead
+              title={<><MessageCircle size={14} className="text-brand-500" /> Platform analytics</>}
+              sub="Active conversations and AI escalation signals by channel"
+            />
+            <div className="grid gap-3 px-5 py-4 md:grid-cols-2 xl:grid-cols-3">
+              {platformAnalytics.map((item) => {
+                const aiRate = item.active_conversations ? Math.round((item.ai_events_count / item.active_conversations) * 100) : 0;
+                return (
+                  <div key={item.channel_type} className="rounded-2xl border border-white/30 bg-white/30 p-4 dark:border-white/10 dark:bg-white/5">
+                    <div className="mb-3 flex items-center justify-between">
+                      <h3 className="text-sm font-semibold capitalize text-slate-800 dark:text-slate-100">{formatSourceLabel(item.channel_type)}</h3>
+                      <span className="rounded-full bg-brand-500/15 px-2.5 py-1 text-[11px] font-semibold text-brand-700 dark:text-brand-300">{aiRate}% AI rate</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 dark:text-slate-300">
+                      <div className="rounded-xl bg-white/40 p-2 dark:bg-black/20">
+                        <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Active</div>
+                        <div className="mt-1 font-semibold text-slate-900 dark:text-white">{item.active_conversations}</div>
+                      </div>
+                      <div className="rounded-xl bg-white/40 p-2 dark:bg-black/20">
+                        <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">New</div>
+                        <div className="mt-1 font-semibold text-slate-900 dark:text-white">{item.new_conversations}</div>
+                      </div>
+                      <div className="rounded-xl bg-white/40 p-2 dark:bg-black/20">
+                        <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">AI events</div>
+                        <div className="mt-1 font-semibold text-slate-900 dark:text-white">{item.ai_events_count}</div>
+                      </div>
+                      <div className="rounded-xl bg-white/40 p-2 dark:bg-black/20">
+                        <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Handovers</div>
+                        <div className="mt-1 font-semibold text-slate-900 dark:text-white">{item.handover_count}</div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </BCard>
+
           {/* ── Follow-up tasks ── lg: col 1-7, rows 3-4 */}
-          <BCard className="lg:col-span-7 lg:row-span-2" delay="100ms">
+          <BCard className="lg:col-span-7 lg:row-span-2" delay="260ms">
             <CardHead
               title={<><CheckSquare size={14} className="text-brand-500" /> Follow up on tasks</>}
               sub="AI-recommended tasks based on your pipeline activity"
@@ -507,7 +610,7 @@ export default function DashboardPage() {
           </BCard>
 
           {/* ── Goal completion ── lg: col 8-12, rows 3-4 */}
-          <BCard className="lg:col-span-5" delay="140ms">
+          <BCard className="lg:col-span-5" delay="300ms">
             <CardHead title={<><Activity size={14} className="text-brand-500" /> Goal Completion</>} actions={<IconBtn icon={Settings} label="Settings" />} />
             <div className="px-5 py-4">
               <div className="mb-5 flex overflow-hidden rounded-xl border border-white/30 dark:border-white/10 text-xs bg-white/20 dark:bg-white/5">
@@ -536,7 +639,7 @@ export default function DashboardPage() {
           </BCard>
 
           {/* ── Task completion ── lg: col 8-12, row 5 */}
-          <BCard className="lg:col-span-5" delay="180ms">
+          <BCard className="lg:col-span-5" delay="340ms">
             <CardHead title={<><CheckSquare size={14} className="text-brand-500" /> Task Completion</>} />
             <div className="px-5 py-5 text-center">
                <div className="mx-auto mb-3 flex h-10 items-end justify-center gap-1">
