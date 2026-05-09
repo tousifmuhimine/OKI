@@ -3,12 +3,12 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, get_current_auth, get_session_dep
 from app.api.deps import has_permission
-from app.db.models import AIEvent, Conversation, UserLLMConfig
+from app.db.models import AIEvent, Conversation, Lead,UserLLMConfig
 from app.inbox.llm_providers.groq import SUPPORTED_GROQ_MODELS
 from app.inbox.security import encrypt_channel_config, summarize_channel_config
 from app.schemas.llm import UserLLMConfigCreate, UserLLMConfigRead
@@ -96,13 +96,22 @@ def _validate_groq_models(payload: UserLLMConfigCreate) -> None:
 async def list_configs(
     auth: AuthContext = Depends(get_current_auth), session: AsyncSession = Depends(get_session_dep)
 ):
-    q = select(UserLLMConfig).where(UserLLMConfig.user_id == auth.user_id)
+    # Return per-user configs as well as workspace-level configs (and org-level when present)
+    ownership_conditions = [
+        UserLLMConfig.user_id == auth.user_id,
+        UserLLMConfig.workspace_id == auth.user_id,
+    ]
+    if auth.org_id:
+        ownership_conditions.append(UserLLMConfig.workspace_id == auth.org_id)
+
+    q = select(UserLLMConfig).where(or_(*ownership_conditions))
     res = await session.execute(q)
     rows = res.scalars().all()
 
-    # mask encrypted config when returning
-    results = []
-    for r in rows:
+    # mask encrypted config when returning and dedupe by id
+    unique: dict[str, UserLLMConfig] = {r.id: r for r in rows}
+    results: list[UserLLMConfigRead] = []
+    for r in unique.values():
         results.append(UserLLMConfigRead(
             id=r.id,
             provider=r.provider,
@@ -339,13 +348,19 @@ async def ai_monitor_status(
     week_start = today_start - timedelta(days=today_start.weekday())
 
     # Configs
-    q = select(UserLLMConfig).where(
-        UserLLMConfig.user_id == auth.user_id
-    )
+    ownership_conditions = [
+        UserLLMConfig.user_id == auth.user_id,
+        UserLLMConfig.workspace_id == auth.user_id,
+    ]
+    if auth.org_id:
+        ownership_conditions.append(UserLLMConfig.workspace_id == auth.org_id)
+
+    q = select(UserLLMConfig).where(or_(*ownership_conditions))
     rows = (await session.execute(q)).scalars().all()
+    unique_rows: dict[str, UserLLMConfig] = {r.id: r for r in rows}
     configs = []
     automation_summary: dict[str, str] = {}
-    for r in rows:
+    for r in unique_rows.values():
         configs.append({
             "id": r.id,
             "provider": r.provider,
