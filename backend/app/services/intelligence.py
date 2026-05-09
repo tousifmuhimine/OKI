@@ -344,3 +344,52 @@ async def upsert_platform_metric(
     session.add(metric)
     await session.flush()
     return metric
+
+
+async def create_alert_notification(
+    session: AsyncSession,
+    *,
+    workspace_id: str,
+    title: str,
+    message: str,
+    severity: str = "medium",
+    conversation_id: str | None = None,
+    lead_id: str | None = None,
+    alert_rule_id: str | None = None,
+    payload: dict[str, Any] | None = None,
+) -> AlertNotification:
+    """Create and persist a standalone AlertNotification.
+
+    This is used by the signal detection system to immediately record and push
+    alerts for negotiation, frustration, high-intent, or drop-off events without
+    requiring a pre-existing AlertRule.
+
+    Args:
+        session: Database session.
+        workspace_id: The workspace to notify.
+        title: Short human-readable alert title.
+        message: Longer description of the event.
+        severity: \"high\" | \"medium\" | \"low\".
+        conversation_id: Optional linked conversation.
+        lead_id: Optional linked lead.
+        alert_rule_id: Optional linked alert rule.
+        payload: Additional structured data.
+
+    Returns:
+        Persisted AlertNotification object.
+    """
+    notification = AlertNotification(
+        workspace_id=workspace_id,
+        alert_rule_id=alert_rule_id,
+        title=title,
+        message=message,
+        severity=severity,
+        conversation_id=conversation_id,
+        lead_id=lead_id,
+        payload=payload or {},
+        delivered_at=datetime.now(timezone.utc),
+    )
+    session.add(notification)
+    await session.flush()
+    return notification
+

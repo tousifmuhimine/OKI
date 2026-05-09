@@ -20,7 +20,8 @@ from app.inbox.llm_providers.groq import DEFAULT_GROQ_MODEL
 from app.inbox.security import decrypt_channel_config
 from app.services.lead_capture import upsert_lead_from_inbound_message
 from app.services.entity_extraction import detect_intent_from_message, update_lead_intent
-from app.services.intelligence import evaluate_intelligence_alerts, record_preference_history
+from app.services.intelligence import evaluate_intelligence_alerts, record_preference_history, create_alert_notification
+from app.services.conversation_stage import detect_conversation_stage, analyze_message_signals
 from app.schemas.inbox import WebhookAck
 from app.inbox.llm_providers.groq import GroqProvider
 from app.inbox.channels import send_channel_message
@@ -433,6 +434,12 @@ async def _maybe_auto_reply(
 
     lead = await _get_conversation_lead(session, conversation.id)
 
+    # Count messages for stage detection
+    msg_count_result = await session.execute(
+        select(Message).where(Message.conversation_id == conversation.id)
+    )
+    message_count = len(msg_count_result.scalars().all())
+
     detected_intent = None
     try:
         classification = await detect_intent_from_message(
@@ -454,6 +461,61 @@ async def _maybe_auto_reply(
             )
     except Exception as exc:
         logger.debug("[auto-reply] intent detection skipped: %s", exc)
+
+    # Conversation stage classification
+    conv_stage = detect_conversation_stage(lead=lead, message_count=message_count)
+
+    # Detect negotiation / frustration / high intent / drop-off signals
+    msg_signals = analyze_message_signals(incoming_text)
+    if msg_signals.alert_type and not conversation.is_bot_paused:
+        try:
+            alert_titles = {
+                "hot_lead": "🔥 Hot Lead — High Intent Detected",
+                "negotiation": "💬 Negotiation Signal Detected",
+                "frustration": "⚠️ Customer Frustration Detected",
+                "drop_off_risk": "📉 Drop-off Risk Detected",
+            }
+            alert_messages = {
+                "hot_lead": f"Customer sent a strong buying signal: '{incoming_text[:200]}'",
+                "negotiation": f"Customer is negotiating price: '{incoming_text[:200]}'",
+                "frustration": f"Customer appears frustrated: '{incoming_text[:200]}'",
+                "drop_off_risk": f"Customer may be dropping off: '{incoming_text[:200]}'",
+            }
+            alert_type = msg_signals.alert_type
+            notif = await create_alert_notification(
+                session,
+                workspace_id=inbox.workspace_id,
+                title=alert_titles.get(alert_type, "AI Alert"),
+                message=alert_messages.get(alert_type, incoming_text[:200]),
+                severity=msg_signals.severity,
+                conversation_id=conversation.id,
+                lead_id=lead.id if lead else None,
+                payload={
+                    "alert_type": alert_type,
+                    "matched_patterns": msg_signals.matched_patterns,
+                    "conv_stage": conv_stage.stage,
+                },
+            )
+            # Broadcast alert notification via WS
+            try:
+                from app.inbox.ws_hub import broadcast_notification
+                await broadcast_notification(
+                    workspace_id=inbox.workspace_id,
+                    notification={
+                        "id": notif.id,
+                        "title": notif.title,
+                        "message": notif.message,
+                        "severity": notif.severity,
+                        "alert_type": alert_type,
+                        "conversation_id": conversation.id,
+                        "lead_id": lead.id if lead else None,
+                        "delivered_at": notif.delivered_at.isoformat() if notif.delivered_at else None,
+                    },
+                )
+            except Exception as ws_exc:
+                logger.debug("[auto-reply] WS notification broadcast skipped: %s", ws_exc)
+        except Exception as alert_exc:
+            logger.debug("[auto-reply] signal alert creation failed: %s", alert_exc)
 
     # simple handover heuristic: keywords and certain detected intents
     def _should_handover(text: str, intent: str | None) -> bool:
@@ -546,13 +608,11 @@ async def _maybe_auto_reply(
         system_lines = [
             "You are a helpful, concise sales assistant that replies on behalf of the team.",
             "Use the conversation history for context and answer in a friendly professional tone.",
-            "If the lead's name is missing, ask for their name first.",
-            "If the lead's email is missing, ask for their email next.",
-            "If both are missing, ask for both in one short message.",
+            conv_stage.system_prompt_instructions,
             "Keep the response brief and ask at most one clear follow-up question.",
         ]
         if detected_intent:
-            system_lines.append(f"Detected intent: {detected_intent}.")
+            system_lines.append(f"Detected customer intent: {detected_intent}.")
         if missing_fields:
             system_lines.append(f"Missing lead fields: {', '.join(missing_fields)}.")
         system = " ".join(system_lines)

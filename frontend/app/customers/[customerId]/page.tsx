@@ -181,8 +181,8 @@ export default function CustomerProfilePage() {
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
-                  <label className="mb-1 block text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Company name</label>
-                  <input value={draft.company_name ?? ""} onChange={(e) => setDraft((current) => ({ ...current, company_name: e.target.value }))} className="w-full rounded-xl border border-white/50 bg-white/60 px-3 py-2.5 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Company / Customer name</label>
+                  <input required value={draft.company_name ?? ""} onChange={(e) => setDraft((current) => ({ ...current, company_name: e.target.value }))} className="w-full rounded-xl border border-white/50 bg-white/60 px-3 py-2.5 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Contact person</label>
@@ -194,7 +194,7 @@ export default function CustomerProfilePage() {
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Phone</label>
-                  <input value={draft.phone ?? ""} onChange={(e) => setDraft((current) => ({ ...current, phone: e.target.value }))} className="w-full rounded-xl border border-white/50 bg-white/60 px-3 py-2.5 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+                  <input required value={draft.phone ?? ""} onChange={(e) => setDraft((current) => ({ ...current, phone: e.target.value }))} className="w-full rounded-xl border border-white/50 bg-white/60 px-3 py-2.5 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
                 </div>
                 <div className="sm:col-span-2">
                   <label className="mb-1 block text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Address</label>

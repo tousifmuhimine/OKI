@@ -5,6 +5,7 @@ export type PlatformChannelAnalytics = {
   ai_events_count: number;
   handover_count: number;
   converted_leads_count: number;
+  ai_rate: number;
 };
 
 export type DashboardSummary = {
@@ -18,6 +19,14 @@ export type DashboardSummary = {
   lead_source_breakdown: Record<string, number>;
   converted_source_breakdown: Record<string, number>;
   platform_analytics: PlatformChannelAnalytics[];
+  // AI monitoring metrics
+  ai_response_count: number;
+  human_takeover_count: number;
+  failed_conversations: number;
+  total_conversations: number;
+  conversion_rate: number;
+  drop_off_rate: number;
+  unread_notifications: number;
 };
 
 export type Customer = {
@@ -240,5 +249,43 @@ export type Opportunity = {
 
 export type OpportunityListResponse = {
   data: Opportunity[];
+  meta: PaginationMeta;
+};
+
+export type Notification = {
+  id: string;
+  workspace_id: string;
+  title: string;
+  message: string;
+  severity: "high" | "medium" | "low";
+  alert_rule_id: string | null;
+  conversation_id: string | null;
+  lead_id: string | null;
+  payload: Record<string, unknown>;
+  delivered_at: string;
+  read_at: string | null;
+};
+
+export type NotificationListResponse = {
+  data: Notification[];
+  meta: PaginationMeta;
+};
+
+export type UnreadCountResponse = {
+  unread_count: number;
+};
+
+export type PermissionGrant = {
+  id: string;
+  workspace_id: string;
+  user_id: string;
+  permission_key: string;
+  is_allowed: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PermissionGrantListResponse = {
+  data: PermissionGrant[];
   meta: PaginationMeta;
 };

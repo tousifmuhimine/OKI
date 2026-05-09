@@ -43,7 +43,7 @@ class CustomerBase(BaseModel):
 
 
 class CustomerCreate(CustomerBase):
-    pass
+    phone: str = Field(min_length=1, max_length=50)
 
 
 class CustomerUpdate(BaseModel):

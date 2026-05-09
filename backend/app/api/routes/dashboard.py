@@ -3,7 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, get_current_auth, get_session_dep
-from app.db.models import AIEvent, Conversation, Customer, Lead, Opportunity, Product, SalesOrder
+from app.db.models import AIEvent, AlertNotification, Conversation, Customer, Lead, Opportunity, Product, SalesOrder
 from app.schemas.dashboard import DashboardSummary, PlatformChannelAnalytics
 from app.services.intelligence import upsert_platform_metric
 
@@ -45,6 +45,78 @@ async def dashboard_summary(
         )
     ).all()
 
+    # ---------------------------------------------------------------------------
+    # AI monitoring metrics
+    # ---------------------------------------------------------------------------
+    total_conversations = (
+        await session.execute(
+            select(func.count(Conversation.id)).where(Conversation.workspace_id == auth.user_id)
+        )
+    ).scalar_one()
+
+    ai_response_count = (
+        await session.execute(
+            select(func.count(AIEvent.id))
+            .join(Conversation, Conversation.id == AIEvent.conversation_id)
+            .where(
+                Conversation.workspace_id == auth.user_id,
+                AIEvent.event_type == "ai_reply",
+            )
+        )
+    ).scalar_one()
+
+    human_takeover_count = (
+        await session.execute(
+            select(func.count(AIEvent.id))
+            .join(Conversation, Conversation.id == AIEvent.conversation_id)
+            .where(
+                Conversation.workspace_id == auth.user_id,
+                AIEvent.event_type == "handover_trigger",
+            )
+        )
+    ).scalar_one()
+
+    # Failed conversations: resolved with no converted lead
+    failed_conversations = (
+        await session.execute(
+            select(func.count(Conversation.id)).where(
+                Conversation.workspace_id == auth.user_id,
+                Conversation.status == "resolved",
+                ~Conversation.contact_id.in_(
+                    select(Lead.contact_id)
+                    .where(Lead.converted_customer_id.is_not(None), Lead.contact_id.is_not(None))
+                ),
+            )
+        )
+    ).scalar_one()
+
+    total_leads_all = (await session.execute(select(func.count(Lead.id)))).scalar_one()
+    converted_leads_all = (
+        await session.execute(
+            select(func.count(Lead.id)).where(Lead.converted_customer_id.is_not(None))
+        )
+    ).scalar_one()
+    lost_leads = (
+        await session.execute(
+            select(func.count(Lead.id)).where(Lead.status == "lost")
+        )
+    ).scalar_one()
+
+    conversion_rate = round(converted_leads_all / total_leads_all * 100, 2) if total_leads_all > 0 else 0.0
+    drop_off_rate = round(lost_leads / total_leads_all * 100, 2) if total_leads_all > 0 else 0.0
+
+    unread_notifications = (
+        await session.execute(
+            select(func.count(AlertNotification.id)).where(
+                AlertNotification.workspace_id == auth.user_id,
+                AlertNotification.read_at.is_(None),
+            )
+        )
+    ).scalar_one()
+
+    # ---------------------------------------------------------------------------
+    # Per-platform analytics
+    # ---------------------------------------------------------------------------
     platform_analytics: list[PlatformChannelAnalytics] = []
     for channel in ("facebook", "instagram", "whatsapp", "email", "website", "api"):
         active_conversations = (
@@ -97,6 +169,8 @@ async def dashboard_summary(
             )
         ).scalar_one()
 
+        ai_rate = round(ai_events_count / new_conversations * 100, 2) if new_conversations > 0 else 0.0
+
         platform_analytics.append(
             PlatformChannelAnalytics(
                 channel_type=channel,
@@ -105,6 +179,7 @@ async def dashboard_summary(
                 ai_events_count=ai_events_count,
                 handover_count=handover_count,
                 converted_leads_count=converted_leads_count,
+                ai_rate=ai_rate,
             )
         )
         await upsert_platform_metric(
@@ -129,4 +204,12 @@ async def dashboard_summary(
         lead_source_breakdown={row[0] or "unsourced": row[1] for row in lead_source_rows},
         converted_source_breakdown={row[0] or "unsourced": row[1] for row in converted_source_rows},
         platform_analytics=platform_analytics,
+        ai_response_count=ai_response_count,
+        human_takeover_count=human_takeover_count,
+        failed_conversations=failed_conversations,
+        total_conversations=total_conversations,
+        conversion_rate=conversion_rate,
+        drop_off_rate=drop_off_rate,
+        unread_notifications=unread_notifications,
     )
+

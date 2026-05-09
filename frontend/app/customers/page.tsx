@@ -85,7 +85,7 @@ export default function CustomersPage() {
         {/* Add form */}
         <form
           onSubmit={createCustomer}
-          className="mb-6 grid animate-fade-in gap-3 glass-card p-5 sm:grid-cols-2 lg:grid-cols-5"
+          className="mb-6 grid animate-fade-in items-start gap-3 glass-card p-5 sm:grid-cols-2 lg:grid-cols-5"
         >
           <div className="relative">
             <Building2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400" />
@@ -94,7 +94,7 @@ export default function CustomersPage() {
               value={companyName}
               onChange={(e) => setCompanyName(e.target.value)}
               className="w-full rounded-xl border border-white/50 bg-white/50 dark:border-white/10 dark:bg-black/20 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-brand-400 focus:bg-white/80 focus:ring-2 focus:ring-brand-400/20 dark:text-white dark:focus:border-brand-500 dark:focus:bg-white/10"
-              placeholder="Company name"
+              placeholder="Company / Customer name"
             />
           </div>
           <div className="relative">
@@ -118,6 +118,7 @@ export default function CustomersPage() {
           <div className="relative">
             <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400" />
             <input
+              required
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               className="w-full rounded-xl border border-white/50 bg-white/50 dark:border-white/10 dark:bg-black/20 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-brand-400 focus:bg-white/80 focus:ring-2 focus:ring-brand-400/20 dark:text-white dark:focus:border-brand-500 dark:focus:bg-white/10"

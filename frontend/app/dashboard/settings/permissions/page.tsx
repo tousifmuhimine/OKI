@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
-import { Shield, Plus, Trash2, Users, Cable, Zap } from "lucide-react";
+import { Shield, Plus, Trash2, Users, Cable, Zap, ChevronDown } from "lucide-react";
 
 import { ProtectedPage } from "@/components/protected-page";
 import { apiRequest } from "@/lib/api";
@@ -25,12 +25,19 @@ type PermissionGrantListResponse = {
 };
 
 const permissionOptions = [
+  "customers.view",
   "customers.manage",
+  "leads.view",
   "leads.manage",
   "tasks.manage",
+  "chat.view",
+  "chat.manage",
+  "analytics.view",
   "ai.settings",
   "permissions.manage",
 ] as const;
+
+const ROLE_PRESETS = ["admin", "supervisor", "agent"] as const;
 
 export default function PermissionsSettingsPage() {
   const pathname = usePathname();
@@ -41,6 +48,66 @@ export default function PermissionsSettingsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  // --- CUSTOM THEMED SELECT COMPONENT ---
+  const ThemedSelect = ({
+    value,
+    onChange,
+    options,
+    placeholder,
+    icon: Icon,
+    className = ""
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    options: { value: string; label: string }[];
+    placeholder: string;
+    icon?: any;
+    className?: string;
+  }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const selectedLabel = options.find(o => o.value === value)?.label || placeholder;
+
+    return (
+      <div className={`relative ${className}`}>
+        <button
+          type="button"
+          onClick={() => setIsOpen(!isOpen)}
+          className="h-11 w-full flex items-center gap-3 rounded-xl border border-white/40 bg-white/60 px-3.5 py-2 text-left text-sm text-slate-700 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-400/20 dark:border-white/10 dark:bg-black/20 dark:text-slate-200"
+        >
+          {Icon && <Icon size={15} className="text-slate-500 shrink-0" />}
+          <span className={`flex-1 truncate font-medium ${!value ? 'text-slate-400' : ''}`}>{selectedLabel}</span>
+          <ChevronDown size={14} className={`text-brand-500/60 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+        </button>
+
+        {isOpen && (
+          <>
+            <div className="absolute left-0 right-0 top-full z-[60] mt-2 animate-scale-in overflow-hidden rounded-xl border border-white/20 bg-white/95 p-1 shadow-2xl backdrop-blur-2xl dark:border-white/10 dark:bg-slate-900/95">
+              {options.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => {
+                    onChange(opt.value);
+                    setIsOpen(false);
+                  }}
+                  className={`w-full rounded-lg px-3 py-2.5 text-left text-xs font-bold transition-all hover:bg-brand-500 hover:text-white ${
+                    value === opt.value
+                      ? 'bg-brand-500/10 text-brand-600 dark:text-brand-400'
+                      : 'text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <div className="fixed inset-0 z-50 cursor-default" onClick={() => setIsOpen(false)} />
+          </>
+        )}
+      </div>
+    );
+  };
+  // --- END CUSTOM THEMED SELECT ---
 
   async function loadGrants() {
     try {
@@ -92,6 +159,27 @@ export default function PermissionsSettingsPage() {
     }
   }
 
+  const [role, setRole] = useState<string>("agent");
+  const [applyingPreset, setApplyingPreset] = useState(false);
+
+  async function applyPreset() {
+    if (!userId.trim()) { setError("User ID is required to apply a preset."); return; }
+    setApplyingPreset(true);
+    try {
+      await apiRequest("/permissions/presets", {
+        method: "POST",
+        body: JSON.stringify({ user_id: userId.trim(), role }),
+      });
+      setNotice(`${role} preset applied to ${userId.slice(0,12)}...`);
+      setUserId("");
+      await loadGrants();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setApplyingPreset(false);
+    }
+  }
+
   const grouped = useMemo(() => {
     return grants.reduce<Record<string, PermissionGrant[]>>((acc, grant) => {
       acc[grant.user_id] = acc[grant.user_id] || [];
@@ -137,11 +225,30 @@ export default function PermissionsSettingsPage() {
                 <span className="mb-1 block text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">User ID</span>
                 <input value={userId} onChange={(e) => setUserId(e.target.value)} className="w-full rounded-xl border border-white/50 bg-white/60 px-3 py-2.5 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" placeholder="target user id" />
               </label>
+              {/* Quick role preset */}
+              <div className="rounded-xl border border-white/30 bg-white/30 p-3 dark:border-white/10 dark:bg-white/5">
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Quick preset</span>
+                <div className="flex gap-2">
+                  <ThemedSelect
+                    value={role}
+                    onChange={setRole}
+                    placeholder="Select role preset"
+                    options={ROLE_PRESETS.map((r) => ({ value: r, label: r.charAt(0).toUpperCase() + r.slice(1) }))}
+                    className="flex-1"
+                  />
+                  <button type="button" onClick={() => void applyPreset()} disabled={applyingPreset} className="rounded-xl bg-indigo-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-600 disabled:opacity-60">
+                    {applyingPreset ? "..." : "Apply"}
+                  </button>
+                </div>
+              </div>
               <label className="block">
                 <span className="mb-1 block text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Permission</span>
-                <select value={permissionKey} onChange={(e) => setPermissionKey(e.target.value as (typeof permissionOptions)[number])} className="w-full rounded-xl border border-white/50 bg-white/60 px-3 py-2.5 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white">
-                  {permissionOptions.map((item) => <option key={item} value={item}>{item}</option>)}
-                </select>
+                <ThemedSelect
+                  value={permissionKey}
+                  onChange={(v) => setPermissionKey(v as typeof permissionOptions[number])}
+                  placeholder="Select permission"
+                  options={permissionOptions.map((item) => ({ value: item, label: item }))}
+                />
               </label>
               <label className="flex items-center gap-2 rounded-xl border border-white/30 bg-white/40 px-3 py-3 text-sm text-slate-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-200">
                 <input type="checkbox" checked={isAllowed} onChange={(e) => setIsAllowed(e.target.checked)} />

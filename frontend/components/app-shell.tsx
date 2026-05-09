@@ -17,10 +17,11 @@ import { clearAllAuthState, isDemoSessionActive } from "@/lib/demo-auth";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 
 const primaryNav = [
-  { href: "/dashboard", label: "Workbench",  icon: LayoutDashboard, badge: "3" },
+  { href: "/dashboard", label: "Workbench",  icon: LayoutDashboard, badge: "" },
   { href: "/customers", label: "Customers",  icon: Users },
   { href: "/leads",     label: "OKKI Leads", icon: Zap },
   { href: "/orders",    label: "Trading",    icon: ShoppingCart },
+  { href: "/dashboard/analytics", label: "Analytics", icon: BarChart2 },
 ];
 
 const mobileNav = [
@@ -28,7 +29,7 @@ const mobileNav = [
   { href: "/customers", label: "Customers", icon: Users },
   { href: "/dashboard/inbox", label: "Inbox", icon: MessageSquare },
   { href: "/leads", label: "Leads", icon: Zap },
-  { href: "/orders", label: "Orders", icon: ShoppingCart },
+  { href: "/dashboard/analytics", label: "Analytics", icon: BarChart2 },
 ];
 
 const secondaryNav = [
@@ -80,9 +81,74 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [qnError, setQnError] = useState<string | null>(null);
   const [qnSuccess, setQnSuccess] = useState(false);
 
+  // Notification state
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notifications, setNotifications] = useState<{
+    id: string; title: string; message: string;
+    severity: string; read_at: string | null; delivered_at: string;
+    conversation_id: string | null;
+  }[]>([]);
+  const [notifLoading, setNotifLoading] = useState(false);
+
+  async function loadNotifications() {
+    setNotifLoading(true);
+    try {
+      const [listRes, countRes] = await Promise.all([
+        apiRequest<{ data: typeof notifications; meta: unknown }>("/notifications?limit=10"),
+        apiRequest<{ unread_count: number }>("/notifications/unread-count"),
+      ]);
+      setNotifications(listRes.data);
+      setUnreadCount(countRes.unread_count);
+    } catch {
+      // silent fail
+    } finally {
+      setNotifLoading(false);
+    }
+  }
+
+  async function markRead(id: string) {
+    try {
+      await apiRequest(`/notifications/${id}/read`, { method: "PATCH" });
+      setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, read_at: new Date().toISOString() } : n));
+      setUnreadCount((c) => Math.max(0, c - 1));
+    } catch { /* silent */ }
+  }
+
+  async function markAllRead() {
+    try {
+      await apiRequest("/notifications/read-all", { method: "PATCH" });
+      setNotifications((prev) => prev.map((n) => ({ ...n, read_at: n.read_at ?? new Date().toISOString() })));
+      setUnreadCount(0);
+    } catch { /* silent */ }
+  }
+
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [pathname]);
+
+  // Load notifications on mount + WS for live push
+  useEffect(() => {
+    void loadNotifications();
+
+    let ws: WebSocket | null = null;
+    try {
+      const proto = window.location.protocol === "https:" ? "wss" : "ws";
+      const base = process.env.NEXT_PUBLIC_API_URL?.replace(/^https?/, proto) ?? `${proto}://${window.location.hostname}:8000`;
+      ws = new WebSocket(`${base}/api/v1/notifications/ws?workspace_id=dev-user`);
+      ws.onmessage = (evt) => {
+        try {
+          const msg = JSON.parse(evt.data as string);
+          if (msg.event === "notification.created" && msg.data) {
+            setNotifications((prev) => [msg.data, ...prev].slice(0, 20));
+            setUnreadCount((c) => c + 1);
+          }
+        } catch { /* ignore */ }
+      };
+    } catch { /* ws not available */ }
+    return () => { ws?.close(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!mobileMenuOpen) return;
@@ -254,15 +320,84 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <span className="hidden sm:inline">New</span>
           </button>
 
-          <button
-            id="header-notifications"
-            type="button"
-            aria-label="Notifications"
-            className="relative flex h-8 w-8 items-center justify-center rounded-xl text-slate-500 transition hover:bg-brand-50 hover:text-brand-600 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-brand-300"
-          >
-            <Bell size={15} />
-            <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-brand-500 shadow-[0_0_8px_rgba(99,102,241,0.8)]" />
-          </button>
+          {/* Notification Bell */}
+          <div className="relative">
+            <button
+              id="header-notifications"
+              type="button"
+              aria-label="Notifications"
+              onClick={() => { setNotifOpen((o) => !o); if (!notifOpen) void loadNotifications(); }}
+              className="relative flex h-8 w-8 items-center justify-center rounded-xl text-slate-500 transition hover:bg-brand-50 hover:text-brand-600 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-brand-300"
+            >
+              <Bell size={15} />
+              {unreadCount > 0 && (
+                <span className="absolute right-1 top-1 flex h-4 min-w-[14px] items-center justify-center rounded-full bg-rose-500 px-0.5 text-[9px] font-bold text-white shadow-[0_0_8px_rgba(239,68,68,0.6)]">
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </span>
+              )}
+            </button>
+
+            {notifOpen && (
+              <div className="absolute right-0 top-full z-50 mt-2 w-[340px] overflow-hidden rounded-2xl border border-white/30 bg-white/95 shadow-2xl backdrop-blur-2xl dark:border-white/10 dark:bg-slate-900/95">
+                <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 dark:border-white/10">
+                  <div className="flex items-center gap-2">
+                    <Bell size={14} className="text-brand-500" />
+                    <span className="text-sm font-semibold text-slate-900 dark:text-white">Alerts</span>
+                    {unreadCount > 0 && (
+                      <span className="rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-bold text-rose-600 dark:text-rose-400">{unreadCount} new</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {unreadCount > 0 && (
+                      <button onClick={() => void markAllRead()} className="text-[11px] font-semibold text-brand-600 hover:underline dark:text-brand-400">Mark all read</button>
+                    )}
+                    <button onClick={() => setNotifOpen(false)} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"><X size={14} /></button>
+                  </div>
+                </div>
+
+                <div className="max-h-[360px] overflow-y-auto">
+                  {notifLoading ? (
+                    <div className="flex items-center justify-center py-8 text-sm text-slate-400 dark:text-slate-500"><Loader2 size={16} className="animate-spin mr-2" /> Loading…</div>
+                  ) : notifications.length === 0 ? (
+                    <div className="py-10 text-center text-sm text-slate-400 dark:text-slate-500">No alerts yet.</div>
+                  ) : (
+                    notifications.map((n) => {
+                      const severityColors: Record<string, string> = {
+                        high: "bg-rose-500/15 text-rose-600 dark:text-rose-400",
+                        medium: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+                        low: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+                      };
+                      return (
+                        <div
+                          key={n.id}
+                          onClick={() => { if (!n.read_at) void markRead(n.id); }}
+                          className={`flex cursor-pointer gap-3 border-b border-slate-100 px-4 py-3 transition hover:bg-slate-50 dark:border-white/5 dark:hover:bg-white/5 ${!n.read_at ? "bg-brand-50/40 dark:bg-brand-500/5" : ""}`}
+                        >
+                          <div className={`mt-0.5 shrink-0 rounded-lg px-1.5 py-0.5 text-[10px] font-bold ${severityColors[n.severity] ?? severityColors.low}`}>
+                            {n.severity.toUpperCase()}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className={`text-xs font-semibold ${!n.read_at ? "text-slate-900 dark:text-white" : "text-slate-600 dark:text-slate-300"}`}>{n.title}</p>
+                            <p className="mt-0.5 truncate text-[11px] text-slate-500 dark:text-slate-400">{n.message}</p>
+                            <p className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
+                              {new Date(n.delivered_at).toLocaleString()}
+                            </p>
+                          </div>
+                          {!n.read_at && <div className="mt-2 h-2 w-2 shrink-0 rounded-full bg-brand-500" />}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                <div className="border-t border-slate-100 px-4 py-2.5 text-center dark:border-white/10">
+                  <Link href="/dashboard/analytics" onClick={() => setNotifOpen(false)} className="text-xs font-semibold text-brand-600 hover:underline dark:text-brand-400">
+                    View Analytics Dashboard →
+                  </Link>
+                </div>
+              </div>
+            )}
+          </div>
 
           <ThemeToggle />
 

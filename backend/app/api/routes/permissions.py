@@ -12,28 +12,36 @@ router = APIRouter()
 
 ROLE_PERMISSION_PRESETS: dict[str, list[str]] = {
     "admin": [
+        "customers.view",
         "customers.manage",
+        "leads.view",
         "leads.manage",
         "tasks.manage",
         "analytics.view",
+        "chat.view",
         "chat.manage",
         "ai.settings",
         "permissions.manage",
     ],
     "supervisor": [
+        "customers.view",
         "customers.manage",
+        "leads.view",
         "leads.manage",
         "tasks.manage",
         "analytics.view",
+        "chat.view",
         "chat.manage",
     ],
     "agent": [
         "customers.view",
         "leads.view",
         "tasks.manage",
+        "chat.view",
         "chat.manage",
     ],
 }
+
 
 
 @router.post("/presets", response_model=PermissionPresetResponse, status_code=status.HTTP_201_CREATED)
