@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, get_current_auth, get_session_dep
 from app.db.models import AIEvent, Conversation, Customer, Lead, Opportunity, Product, SalesOrder
-from app.schemas.dashboard import DashboardSummary, PlatformChannelAnalytics
+from app.schemas.dashboard import DashboardIntelligence, DashboardSummary, PlatformChannelAnalytics
 from app.services.intelligence import upsert_platform_metric
 
 
@@ -118,6 +118,58 @@ async def dashboard_summary(
             converted_leads_count=converted_leads_count,
         )
 
+    # ── Intelligence metrics ──────────────────────────────────────
+    intent_rows = (
+        await session.execute(
+            select(Lead.intent, func.count(Lead.id))
+            .where(Lead.intent.isnot(None), Lead.intent != "")
+            .group_by(Lead.intent)
+        )
+    ).all()
+    engagement_rows = (
+        await session.execute(
+            select(Lead.engagement, func.count(Lead.id))
+            .where(Lead.engagement.isnot(None), Lead.engagement != "")
+            .group_by(Lead.engagement)
+        )
+    ).all()
+    trust_rows = (
+        await session.execute(
+            select(Lead.trust_level, func.count(Lead.id))
+            .where(Lead.trust_level.isnot(None), Lead.trust_level != "")
+            .group_by(Lead.trust_level)
+        )
+    ).all()
+    leads_with_budget = (
+        await session.execute(
+            select(func.count(Lead.id)).where(Lead.budget_min.isnot(None))
+        )
+    ).scalar_one()
+
+    intelligence = DashboardIntelligence(
+        intent_breakdown={row[0]: row[1] for row in intent_rows},
+        engagement_breakdown={row[0]: row[1] for row in engagement_rows},
+        trust_level_breakdown={row[0]: row[1] for row in trust_rows},
+        leads_with_budget=leads_with_budget,
+        ai_events_count=(
+            await session.execute(
+                select(func.count(AIEvent.id))
+                .join(Conversation, Conversation.id == AIEvent.conversation_id)
+                .where(Conversation.workspace_id == auth.user_id)
+            )
+        ).scalar_one(),
+        handover_count=(
+            await session.execute(
+                select(func.count(AIEvent.id))
+                .join(Conversation, Conversation.id == AIEvent.conversation_id)
+                .where(
+                    Conversation.workspace_id == auth.user_id,
+                    AIEvent.event_type == "handover_trigger",
+                )
+            )
+        ).scalar_one(),
+    )
+
     return DashboardSummary(
         customers=customers,
         leads=leads,
@@ -129,4 +181,5 @@ async def dashboard_summary(
         lead_source_breakdown={row[0] or "unsourced": row[1] for row in lead_source_rows},
         converted_source_breakdown={row[0] or "unsourced": row[1] for row in converted_source_rows},
         platform_analytics=platform_analytics,
+        intelligence=intelligence,
     )

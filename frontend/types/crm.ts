@@ -1,3 +1,12 @@
+export type DashboardIntelligence = {
+  intent_breakdown: Record<string, number>;
+  engagement_breakdown: Record<string, number>;
+  trust_level_breakdown: Record<string, number>;
+  leads_with_budget: number;
+  ai_events_count: number;
+  handover_count: number;
+};
+
 export type PlatformChannelAnalytics = {
   channel_type: ChannelType;
   active_conversations: number;
@@ -18,6 +27,7 @@ export type DashboardSummary = {
   lead_source_breakdown: Record<string, number>;
   converted_source_breakdown: Record<string, number>;
   platform_analytics: PlatformChannelAnalytics[];
+  intelligence: DashboardIntelligence;
 };
 
 export type Customer = {

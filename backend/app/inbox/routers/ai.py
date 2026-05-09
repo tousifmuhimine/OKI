@@ -1,13 +1,14 @@
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, get_current_auth, get_session_dep
 from app.api.deps import has_permission
-from app.db.models import UserLLMConfig
+from app.db.models import AIEvent, Conversation, UserLLMConfig
 from app.inbox.llm_providers.groq import SUPPORTED_GROQ_MODELS
 from app.inbox.security import encrypt_channel_config, summarize_channel_config
 from app.schemas.llm import UserLLMConfigCreate, UserLLMConfigRead
@@ -307,3 +308,123 @@ async def detect_intent(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to detect intent: {str(e)}")
+
+
+class MonitorStatusResponse(BaseModel):
+    configured: bool
+    error: str | None = None
+    configs: list[dict[str, Any]] = []
+    recent_events: list[dict[str, Any]] = []
+    events_today: int = 0
+    events_this_week: int = 0
+    handovers_today: int = 0
+    handovers_this_week: int = 0
+    automation_summary: dict[str, str] = {}
+
+
+@router.get("/monitor/status", response_model=MonitorStatusResponse)
+async def ai_monitor_status(
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> MonitorStatusResponse:
+    """Return AI system status for monitoring dashboard."""
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = today_start - timedelta(days=today_start.weekday())
+
+    # Configs
+    q = select(UserLLMConfig).where(
+        UserLLMConfig.user_id == auth.user_id
+    )
+    rows = (await session.execute(q)).scalars().all()
+    configs = []
+    automation_summary: dict[str, str] = {}
+    for r in rows:
+        configs.append({
+            "id": r.id,
+            "provider": r.provider,
+            "default_model": r.default_model,
+            "automation_modes": r.automation_modes or {},
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+        for ch, mode in (r.automation_modes or {}).items():
+            automation_summary[ch] = mode
+
+    # Recent events (last 50)
+    event_rows = (
+        await session.execute(
+            select(AIEvent)
+            .join(Conversation, Conversation.id == AIEvent.conversation_id)
+            .where(Conversation.workspace_id == auth.user_id)
+            .order_by(AIEvent.created_at.desc())
+            .limit(50)
+        )
+    ).scalars().all()
+    recent_events = [
+        {
+            "id": e.id,
+            "conversation_id": e.conversation_id,
+            "event_type": e.event_type,
+            "payload": e.payload or {},
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+        }
+        for e in event_rows
+    ]
+
+    # Counts
+    events_today = (
+        await session.execute(
+            select(func.count(AIEvent.id))
+            .join(Conversation, Conversation.id == AIEvent.conversation_id)
+            .where(
+                Conversation.workspace_id == auth.user_id,
+                AIEvent.created_at >= today_start,
+            )
+        )
+    ).scalar_one()
+
+    events_this_week = (
+        await session.execute(
+            select(func.count(AIEvent.id))
+            .join(Conversation, Conversation.id == AIEvent.conversation_id)
+            .where(
+                Conversation.workspace_id == auth.user_id,
+                AIEvent.created_at >= week_start,
+            )
+        )
+    ).scalar_one()
+
+    handovers_today = (
+        await session.execute(
+            select(func.count(AIEvent.id))
+            .join(Conversation, Conversation.id == AIEvent.conversation_id)
+            .where(
+                Conversation.workspace_id == auth.user_id,
+                AIEvent.event_type == "handover_trigger",
+                AIEvent.created_at >= today_start,
+            )
+        )
+    ).scalar_one()
+
+    handovers_this_week = (
+        await session.execute(
+            select(func.count(AIEvent.id))
+            .join(Conversation, Conversation.id == AIEvent.conversation_id)
+            .where(
+                Conversation.workspace_id == auth.user_id,
+                AIEvent.event_type == "handover_trigger",
+                AIEvent.created_at >= week_start,
+            )
+        )
+    ).scalar_one()
+
+    return MonitorStatusResponse(
+        configured=len(configs) > 0,
+        error=None,
+        configs=configs,
+        recent_events=recent_events,
+        events_today=events_today,
+        events_this_week=events_this_week,
+        handovers_today=handovers_today,
+        handovers_this_week=handovers_this_week,
+        automation_summary=automation_summary,
+    )

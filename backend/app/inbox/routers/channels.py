@@ -546,15 +546,22 @@ async def _maybe_auto_reply(
         system_lines = [
             "You are a helpful, concise sales assistant that replies on behalf of the team.",
             "Use the conversation history for context and answer in a friendly professional tone.",
-            "If the lead's name is missing, ask for their name first.",
-            "If the lead's email is missing, ask for their email next.",
-            "If both are missing, ask for both in one short message.",
-            "Keep the response brief and ask at most one clear follow-up question.",
+            "",
+            "PROGRESSIVE COLLECTION STRATEGY - Follow this order:",
+            "1. EARLY (first 2-3 messages): Ask ONLY for the customer's name and interest. Do NOT ask for email, phone, or address.",
+            "2. MID (after name collected): Ask about budget, preferences, and requirements naturally.",
+            "3. LATE (after key info known): Ask for email/phone only when needed to proceed.",
+            "",
+            "CRITICAL RULES:",
+            "- NEVER ask for email, phone, or address in the first 2 messages",
+            "- Ask only ONE question per response",
+            "- Do NOT mention you're an AI",
+            "- Keep the response brief and ask at most one clear follow-up question",
         ]
         if detected_intent:
-            system_lines.append(f"Detected intent: {detected_intent}.")
+            system_lines.append(f"Detected customer intent: {detected_intent}.")
         if missing_fields:
-            system_lines.append(f"Missing lead fields: {', '.join(missing_fields)}.")
+            system_lines.append(f"Still needed from customer: {', '.join(missing_fields)} - but ask naturally, don't demand.")
         system = " ".join(system_lines)
 
         header = [f"System: {system}", "Conversation:"]

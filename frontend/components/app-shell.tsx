@@ -12,6 +12,7 @@ import {
   Building2, User, FileText, ArrowRight, Loader2,
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
+import { NotificationPanel } from "@/components/notification-panel";
 
 import { clearAllAuthState, isDemoSessionActive } from "@/lib/demo-auth";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
@@ -37,8 +38,8 @@ const secondaryNav = [
   { label: "Talk",       icon: MessageSquare, href: "/dashboard/inbox" },
   { label: "Leads",      icon: Lightbulb, href: "/leads", dot: true },
   { label: "Pipeline",   icon: TrendingUp, href: "/pipeline" },
-  { label: "Team Data",  icon: BarChart2 },
-  { label: "Synergy",    icon: Infinity },
+  { label: "Team Data",  icon: BarChart2, href: "/dashboard/team" },
+  { label: "Synergy",    icon: Infinity,  href: "/dashboard/synergy" },
 ];
 
 function ThemeToggle() {
@@ -254,15 +255,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <span className="hidden sm:inline">New</span>
           </button>
 
-          <button
-            id="header-notifications"
-            type="button"
-            aria-label="Notifications"
-            className="relative flex h-8 w-8 items-center justify-center rounded-xl text-slate-500 transition hover:bg-brand-50 hover:text-brand-600 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-brand-300"
-          >
-            <Bell size={15} />
-            <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-brand-500 shadow-[0_0_8px_rgba(99,102,241,0.8)]" />
-          </button>
+          <NotificationPanel />
 
           <ThemeToggle />
 

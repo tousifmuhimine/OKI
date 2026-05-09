@@ -10,6 +10,16 @@ class PlatformChannelAnalytics(BaseModel):
     converted_leads_count: int = 0
 
 
+class DashboardIntelligence(BaseModel):
+    """AI intelligence metrics aggregated from leads."""
+    intent_breakdown: dict[str, int] = Field(default_factory=dict)
+    engagement_breakdown: dict[str, int] = Field(default_factory=dict)
+    trust_level_breakdown: dict[str, int] = Field(default_factory=dict)
+    leads_with_budget: int = 0
+    ai_events_count: int = 0
+    handover_count: int = 0
+
+
 class DashboardSummary(BaseModel):
     customers: int
     leads: int
@@ -21,3 +31,4 @@ class DashboardSummary(BaseModel):
     lead_source_breakdown: dict[str, int]
     converted_source_breakdown: dict[str, int]
     platform_analytics: list[PlatformChannelAnalytics] = Field(default_factory=list)
+    intelligence: DashboardIntelligence = Field(default_factory=DashboardIntelligence)

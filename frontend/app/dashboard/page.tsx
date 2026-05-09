@@ -1,18 +1,19 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+  import { useEffect, useState, useMemo } from "react";
 import {
   Calendar, Settings, Maximize2, Plus, RefreshCw, X,
   ChevronRight, Target, CheckSquare, MoreHorizontal,
   Clock, TrendingUp, Info, Users, ChevronDown, Zap,
   Activity, ArrowUpRight, Flame, Circle, ChevronLeft,
-  CalendarDays, AlignLeft, MessageCircle,
+  CalendarDays, AlignLeft, MessageCircle, BrainCircuit,
+  HandMetal, ShieldCheck, Wallet,
 } from "lucide-react";
 
 import { ProtectedPage } from "@/components/protected-page";
 import { apiRequest } from "@/lib/api";
 import { getSupabaseClient } from "@/lib/supabase";
-import { Customer, CustomerListResponse, DashboardSummary } from "@/types/crm";
+import { Customer, CustomerListResponse, DashboardIntelligence, DashboardSummary } from "@/types/crm";
 
 // ─── Types ───────────────────────────────────────────────────────
 type TaskEvent = {
@@ -530,6 +531,134 @@ export default function DashboardPage() {
                   </div>
                 );
               })}
+            </div>
+          </BCard>
+
+          {/* ── AI Intelligence ── lg: col-span-12 */}
+          <BCard className="lg:col-span-12" delay="255ms">
+            <CardHead
+              title={<><BrainCircuit size={14} className="text-brand-500" /> AI Intelligence</>}
+              sub="Lead intent, engagement, trust level, and budget signals from AI analysis"
+            />
+            <div className="grid gap-4 px-5 py-4 md:grid-cols-2 xl:grid-cols-4">
+              {/* Intent breakdown */}
+              <div className="rounded-2xl border border-white/30 bg-white/30 p-4 dark:border-white/10 dark:bg-white/5">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                    <BrainCircuit size={13} className="text-cyan-500" /> Intent
+                  </h3>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Detected</span>
+                </div>
+                <div className="space-y-1.5">
+                  {Object.keys(data?.intelligence?.intent_breakdown ?? {}).length === 0 ? (
+                    <p className="text-xs text-slate-500 py-2">No intent data yet</p>
+                  ) : Object.entries(data?.intelligence?.intent_breakdown ?? {}).map(([intent, count]) => {
+                    const total = data?.leads || 1;
+                    const width = Math.max(8, (count / total) * 100);
+                    return (
+                      <div key={intent}>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="capitalize text-slate-600 dark:text-slate-300">{intent.replace(/_/g, " ")}</span>
+                          <span className="font-semibold text-slate-800 dark:text-slate-100">{count}</span>
+                        </div>
+                        <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-white/40 dark:bg-black/20">
+                          <div className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-blue-500" style={{ width: `${width}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Engagement breakdown */}
+              <div className="rounded-2xl border border-white/30 bg-white/30 p-4 dark:border-white/10 dark:bg-white/5">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                    <HandMetal size={13} className="text-amber-500" /> Engagement
+                  </h3>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Level</span>
+                </div>
+                <div className="space-y-1.5">
+                  {Object.keys(data?.intelligence?.engagement_breakdown ?? {}).length === 0 ? (
+                    <p className="text-xs text-slate-500 py-2">No engagement data yet</p>
+                  ) : Object.entries(data?.intelligence?.engagement_breakdown ?? {}).map(([level, count]) => {
+                    const total = data?.leads || 1;
+                    const width = Math.max(8, (count / total) * 100);
+                    return (
+                      <div key={level}>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="capitalize text-slate-600 dark:text-slate-300">{level}</span>
+                          <span className="font-semibold text-slate-800 dark:text-slate-100">{count}</span>
+                        </div>
+                        <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-white/40 dark:bg-black/20">
+                          <div className={`h-full rounded-full bg-gradient-to-r ${
+                            level === "high" ? "from-emerald-400 to-teal-500" :
+                            level === "medium" ? "from-amber-400 to-orange-400" :
+                            "from-slate-300 to-slate-500"
+                          }`} style={{ width: `${width}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Trust level breakdown */}
+              <div className="rounded-2xl border border-white/30 bg-white/30 p-4 dark:border-white/10 dark:bg-white/5">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                    <ShieldCheck size={13} className="text-emerald-500" /> Trust Level
+                  </h3>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Score</span>
+                </div>
+                <div className="space-y-1.5">
+                  {Object.keys(data?.intelligence?.trust_level_breakdown ?? {}).length === 0 ? (
+                    <p className="text-xs text-slate-500 py-2">No trust data yet</p>
+                  ) : Object.entries(data?.intelligence?.trust_level_breakdown ?? {}).map(([level, count]) => {
+                    const total = data?.leads || 1;
+                    const width = Math.max(8, (count / total) * 100);
+                    return (
+                      <div key={level}>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="capitalize text-slate-600 dark:text-slate-300">{level}</span>
+                          <span className="font-semibold text-slate-800 dark:text-slate-100">{count}</span>
+                        </div>
+                        <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-white/40 dark:bg-black/20">
+                          <div className={`h-full rounded-full bg-gradient-to-r ${
+                            level === "high" ? "from-emerald-400 to-green-500" :
+                            level === "medium" ? "from-amber-400 to-yellow-500" :
+                            "from-rose-300 to-red-400"
+                          }`} style={{ width: `${width}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Budget & AI Events summary */}
+              <div className="rounded-2xl border border-white/30 bg-white/30 p-4 dark:border-white/10 dark:bg-white/5">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                    <Wallet size={13} className="text-violet-500" /> Signals
+                  </h3>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Summary</span>
+                </div>
+                <div className="space-y-3">
+                  <div className="rounded-xl bg-white/40 p-3 dark:bg-black/20">
+                    <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Leads with Budget</div>
+                    <div className="mt-1 text-lg font-bold text-slate-900 dark:text-white">{data?.intelligence?.leads_with_budget ?? 0}</div>
+                  </div>
+                  <div className="rounded-xl bg-white/40 p-3 dark:bg-black/20">
+                    <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">AI Events Total</div>
+                    <div className="mt-1 text-lg font-bold text-slate-900 dark:text-white">{data?.intelligence?.ai_events_count ?? 0}</div>
+                  </div>
+                  <div className="rounded-xl bg-white/40 p-3 dark:bg-black/20">
+                    <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Handover Triggers</div>
+                    <div className="mt-1 text-lg font-bold text-slate-900 dark:text-white">{data?.intelligence?.handover_count ?? 0}</div>
+                  </div>
+                </div>
+              </div>
             </div>
           </BCard>
 
