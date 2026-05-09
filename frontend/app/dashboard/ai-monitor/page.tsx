@@ -32,6 +32,13 @@ type AIStatus = {
   error: string | null;
   configs: LLMConfig[];
   recent_events: AIEvent[];
+  intent_breakdown: Record<string, number>;
+  engagement_breakdown: Record<string, number>;
+  trust_level_breakdown: Record<string, number>;
+  lead_status_breakdown: Record<string, number>;
+  leads_with_budget: number;
+  active_leads_count: number;
+  closed_leads_count: number;
   events_today: number;
   events_this_week: number;
   handovers_today: number;
@@ -68,6 +75,12 @@ function eventTypeIcon(type: string) {
     default:
       return { Icon: Activity, className: "text-slate-500 bg-slate-500/10" };
   }
+}
+
+function topItem(breakdown: Record<string, number>) {
+  const entries = Object.entries(breakdown);
+  if (entries.length === 0) return null;
+  return entries.sort((a, b) => b[1] - a[1])[0];
 }
 
 // ─── Component ──────────────────────────────────────────────────
@@ -179,6 +192,113 @@ export default function AIMonitorPage() {
             <p className="text-base font-bold tracking-tight text-slate-900 dark:text-white">{data?.configs?.length ?? 0}</p>
             <div className="flex items-center gap-2 text-[10px]">
               <span className="text-slate-500">active providers</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="mb-6 grid gap-4 md:grid-cols-3 animate-fade-up">
+          {[
+            { title: "Intent", icon: BrainCircuit, accent: "text-cyan-500", breakdown: data?.intent_breakdown ?? {}, empty: "No intent signals yet" },
+            { title: "Engagement", icon: HandMetal, accent: "text-amber-500", breakdown: data?.engagement_breakdown ?? {}, empty: "No engagement signals yet" },
+            { title: "Trust Level", icon: ShieldCheck, accent: "text-emerald-500", breakdown: data?.trust_level_breakdown ?? {}, empty: "No trust signals yet" },
+          ].map(({ title, icon: Icon, accent, breakdown, empty }, index) => {
+            const top = topItem(breakdown);
+            const total = Object.values(breakdown).reduce((sum, value) => sum + value, 0);
+            return (
+              <div key={title} className="glass-card flex flex-col gap-3 p-4" style={{ animationDelay: `${60 + index * 40}ms` }}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                    <Icon size={14} className={accent} />
+                    {title}
+                  </div>
+                  <span className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">Hidden lead signal</span>
+                </div>
+                {top ? (
+                  <>
+                    <div className="flex items-end justify-between gap-2">
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Top signal</div>
+                        <div className="text-base font-bold capitalize text-slate-900 dark:text-white">{top[0].replace(/_/g, " ")}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Count</div>
+                        <div className="text-xl font-bold text-slate-900 dark:text-white">{top[1]}</div>
+                      </div>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-white/40 dark:bg-black/20">
+                      <div
+                        className={`h-full rounded-full bg-gradient-to-r ${
+                          title === "Intent"
+                            ? "from-cyan-400 to-blue-500"
+                            : title === "Engagement"
+                              ? "from-amber-400 to-orange-400"
+                              : "from-emerald-400 to-green-500"
+                        }`}
+                        style={{ width: `${Math.max(10, (top[1] / Math.max(total || 1, top[1])) * 100)}%` }}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-xs text-slate-500 py-2">{empty}</p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="mb-6 grid gap-4 lg:grid-cols-[1.2fr_0.8fr] animate-fade-up">
+          <div className="glass-card p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                <Activity size={14} className="text-brand-500" /> Lead Management
+              </h3>
+              <span className="text-[10px] text-slate-500 dark:text-slate-400">Connected to hidden signals</span>
+            </div>
+            <div className="space-y-2">
+              {Object.keys(data?.lead_status_breakdown ?? {}).length === 0 ? (
+                <p className="py-3 text-xs text-slate-500 dark:text-slate-400">No lead status data yet.</p>
+              ) : Object.entries(data?.lead_status_breakdown ?? {}).map(([status, count]) => {
+                const total = (data?.active_leads_count ?? 0) + (data?.closed_leads_count ?? 0) || 1;
+                const width = Math.max(8, (count / total) * 100);
+                return (
+                  <div key={status}>
+                    <div className="mb-1 flex items-center justify-between text-xs">
+                      <span className="capitalize text-slate-600 dark:text-slate-300">{status.replace(/_/g, " ")}</span>
+                      <span className="font-semibold text-slate-800 dark:text-slate-100">{count}</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-white/40 dark:bg-black/20">
+                      <div className="h-full rounded-full bg-gradient-to-r from-brand-400 to-indigo-500" style={{ width: `${width}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="glass-card p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                <ShieldCheck size={14} className="text-emerald-500" /> Lead Snapshot
+              </h3>
+              <span className="text-[10px] text-slate-500 dark:text-slate-400">Pipeline totals</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Active Leads</div>
+                <div className="mt-1 text-lg font-bold text-slate-900 dark:text-white">{data?.active_leads_count ?? 0}</div>
+              </div>
+              <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Closed Leads</div>
+                <div className="mt-1 text-lg font-bold text-slate-900 dark:text-white">{data?.closed_leads_count ?? 0}</div>
+              </div>
+              <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Budget Leads</div>
+                <div className="mt-1 text-lg font-bold text-slate-900 dark:text-white">{data?.leads_with_budget ?? 0}</div>
+              </div>
+              <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Hidden Signals</div>
+                <div className="mt-1 text-lg font-bold text-slate-900 dark:text-white">{Object.values(data?.intent_breakdown ?? {}).reduce((sum, value) => sum + value, 0) + Object.values(data?.engagement_breakdown ?? {}).reduce((sum, value) => sum + value, 0) + Object.values(data?.trust_level_breakdown ?? {}).reduce((sum, value) => sum + value, 0)}</div>
+              </div>
             </div>
           </div>
         </div>

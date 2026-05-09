@@ -131,6 +131,12 @@ function formatSourceLabel(value: string) {
   return value.replace(/_/g, " ");
 }
 
+function getTopBreakdownItem(breakdown: Record<string, number>) {
+  const entries = Object.entries(breakdown);
+  if (entries.length === 0) return null;
+  return entries.sort((a, b) => b[1] - a[1])[0];
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  Dashboard
 // ═══════════════════════════════════════════════════════════════
@@ -658,6 +664,150 @@ export default function DashboardPage() {
                     <div className="mt-1 text-lg font-bold text-slate-900 dark:text-white">{data?.intelligence?.handover_count ?? 0}</div>
                   </div>
                 </div>
+              </div>
+
+              {/* Hidden lead signals */}
+              <div className="rounded-2xl border border-white/30 bg-white/30 p-4 dark:border-white/10 dark:bg-white/5 md:col-span-2 xl:col-span-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                    <BrainCircuit size={13} className="text-brand-500" /> Hidden Lead Signals
+                  </h3>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Intent, engagement, trust</span>
+                </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  {[
+                    {
+                      title: "Intent",
+                      icon: BrainCircuit,
+                      accent: "text-cyan-500",
+                      empty: "No intent signals yet",
+                      breakdown: data?.intelligence?.intent_breakdown ?? {},
+                    },
+                    {
+                      title: "Engagement",
+                      icon: HandMetal,
+                      accent: "text-amber-500",
+                      empty: "No engagement signals yet",
+                      breakdown: data?.intelligence?.engagement_breakdown ?? {},
+                    },
+                    {
+                      title: "Trust Level",
+                      icon: ShieldCheck,
+                      accent: "text-emerald-500",
+                      empty: "No trust signals yet",
+                      breakdown: data?.intelligence?.trust_level_breakdown ?? {},
+                    },
+                  ].map(({ title, icon: Icon, accent, empty, breakdown }) => {
+                    const top = getTopBreakdownItem(breakdown);
+                    return (
+                      <div key={title} className="rounded-xl bg-white/35 p-3 dark:bg-black/20">
+                        <div className="mb-2 flex items-center justify-between">
+                          <span className={`flex items-center gap-1.5 text-xs font-semibold text-slate-800 dark:text-slate-100`}>
+                            <Icon size={12} className={accent} /> {title}
+                          </span>
+                          <span className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Lead signal</span>
+                        </div>
+                        {top ? (
+                          <>
+                            <div className="text-sm font-semibold capitalize text-slate-900 dark:text-white">
+                              {top[0].replace(/_/g, " ")}
+                            </div>
+                            <div className="mt-1 text-lg font-bold text-slate-900 dark:text-white">{top[1]}</div>
+                            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/40 dark:bg-black/20">
+                              <div className={`h-full rounded-full bg-gradient-to-r ${
+                                title === "Intent"
+                                  ? "from-cyan-400 to-blue-500"
+                                  : title === "Engagement"
+                                    ? "from-amber-400 to-orange-400"
+                                    : "from-emerald-400 to-green-500"
+                              }`} style={{ width: `${Math.max(10, (top[1] / Math.max(data?.leads || 1, top[1])) * 100)}%` }} />
+                            </div>
+                          </>
+                        ) : (
+                          <p className="text-xs text-slate-500 py-2">{empty}</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Lead management breakdown */}
+              <div className="rounded-2xl border border-white/30 bg-white/30 p-4 dark:border-white/10 dark:bg-white/5 md:col-span-2 xl:col-span-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                    <Activity size={13} className="text-brand-500" /> Lead Management
+                  </h3>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Pipeline overview</span>
+                </div>
+                <div className="grid gap-3 lg:grid-cols-[1.2fr_0.8fr]">
+                  <div className="space-y-2">
+                    {Object.keys(data?.intelligence?.lead_status_breakdown ?? {}).length === 0 ? (
+                      <p className="text-xs text-slate-500 py-2">No lead status data yet</p>
+                    ) : Object.entries(data?.intelligence?.lead_status_breakdown ?? {}).map(([status, count]) => {
+                      const total = data?.leads || 1;
+                      const width = Math.max(8, (count / total) * 100);
+                      return (
+                        <div key={status}>
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="capitalize text-slate-600 dark:text-slate-300">{status.replace(/_/g, " ")}</span>
+                            <span className="font-semibold text-slate-800 dark:text-slate-100">{count}</span>
+                          </div>
+                          <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-white/40 dark:bg-black/20">
+                            <div className="h-full rounded-full bg-gradient-to-r from-brand-400 to-indigo-500" style={{ width: `${width}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="rounded-xl bg-white/40 p-3 dark:bg-black/20">
+                      <div className="mb-2 flex items-center justify-between">
+                        <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Active Leads</div>
+                        <div className="text-[10px] text-slate-400">Open pipeline</div>
+                      </div>
+                      <div className="mt-1 text-lg font-bold text-slate-900 dark:text-white">{data?.intelligence?.active_leads_count ?? 0}</div>
+                    </div>
+                    <div className="rounded-xl bg-white/40 p-3 dark:bg-black/20">
+                      <div className="mb-2 flex items-center justify-between">
+                        <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Closed Leads</div>
+                        <div className="text-[10px] text-slate-400">Won or lost</div>
+                      </div>
+                      <div className="mt-1 text-lg font-bold text-slate-900 dark:text-white">{data?.intelligence?.closed_leads_count ?? 0}</div>
+                    </div>
+                    <div className="rounded-xl bg-white/40 p-3 dark:bg-black/20">
+                      <div className="mb-2 flex items-center justify-between">
+                        <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Budget Leads</div>
+                        <div className="text-[10px] text-slate-400">Budget captured</div>
+                      </div>
+                      <div className="mt-1 text-lg font-bold text-slate-900 dark:text-white">{data?.intelligence?.leads_with_budget ?? 0}</div>
+                    </div>
+                    <div className="rounded-xl bg-white/40 p-3 dark:bg-black/20">
+                      <div className="mb-2 flex items-center justify-between">
+                        <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Hidden Signals</div>
+                        <div className="text-[10px] text-slate-400">Intent / Engagement / Trust</div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 text-center text-[10px] text-slate-500 dark:text-slate-400">
+                        <div className="rounded-lg bg-white/40 px-2 py-2 dark:bg-black/20">
+                          <div className="font-semibold text-slate-800 dark:text-slate-100">{Object.values(data?.intelligence?.intent_breakdown ?? {}).reduce((sum, value) => sum + value, 0)}</div>
+                          <div>Intent</div>
+                        </div>
+                        <div className="rounded-lg bg-white/40 px-2 py-2 dark:bg-black/20">
+                          <div className="font-semibold text-slate-800 dark:text-slate-100">{Object.values(data?.intelligence?.engagement_breakdown ?? {}).reduce((sum, value) => sum + value, 0)}</div>
+                          <div>Engagement</div>
+                        </div>
+                        <div className="rounded-lg bg-white/40 px-2 py-2 dark:bg-black/20">
+                          <div className="font-semibold text-slate-800 dark:text-slate-100">{Object.values(data?.intelligence?.trust_level_breakdown ?? {}).reduce((sum, value) => sum + value, 0)}</div>
+                          <div>Trust</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <p className="mt-3 px-1 text-[11px] text-slate-500 dark:text-slate-400">
+                  These hidden signals feed the same lead-management pipeline, so you can review intent, engagement, and trust alongside status and budget.
+                </p>
               </div>
             </div>
           </BCard>

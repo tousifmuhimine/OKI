@@ -2,7 +2,10 @@ export type DashboardIntelligence = {
   intent_breakdown: Record<string, number>;
   engagement_breakdown: Record<string, number>;
   trust_level_breakdown: Record<string, number>;
+  lead_status_breakdown: Record<string, number>;
   leads_with_budget: number;
+  active_leads_count: number;
+  closed_leads_count: number;
   ai_events_count: number;
   handover_count: number;
 };

@@ -15,7 +15,10 @@ class DashboardIntelligence(BaseModel):
     intent_breakdown: dict[str, int] = Field(default_factory=dict)
     engagement_breakdown: dict[str, int] = Field(default_factory=dict)
     trust_level_breakdown: dict[str, int] = Field(default_factory=dict)
+    lead_status_breakdown: dict[str, int] = Field(default_factory=dict)
     leads_with_budget: int = 0
+    active_leads_count: int = 0
+    closed_leads_count: int = 0
     ai_events_count: int = 0
     handover_count: int = 0
 

@@ -140,9 +140,26 @@ async def dashboard_summary(
             .group_by(Lead.trust_level)
         )
     ).all()
+    lead_status_rows = (
+        await session.execute(
+            select(Lead.status, func.count(Lead.id))
+            .group_by(Lead.status)
+        )
+    ).all()
     leads_with_budget = (
         await session.execute(
             select(func.count(Lead.id)).where(Lead.budget_min.isnot(None))
+        )
+    ).scalar_one()
+
+    active_leads_count = (
+        await session.execute(
+            select(func.count(Lead.id)).where(Lead.status.notin_(["won", "lost"]))
+        )
+    ).scalar_one()
+    closed_leads_count = (
+        await session.execute(
+            select(func.count(Lead.id)).where(Lead.status.in_(["won", "lost"]))
         )
     ).scalar_one()
 
@@ -150,7 +167,10 @@ async def dashboard_summary(
         intent_breakdown={row[0]: row[1] for row in intent_rows},
         engagement_breakdown={row[0]: row[1] for row in engagement_rows},
         trust_level_breakdown={row[0]: row[1] for row in trust_rows},
+        lead_status_breakdown={row[0]: row[1] for row in lead_status_rows},
         leads_with_budget=leads_with_budget,
+        active_leads_count=active_leads_count,
+        closed_leads_count=closed_leads_count,
         ai_events_count=(
             await session.execute(
                 select(func.count(AIEvent.id))

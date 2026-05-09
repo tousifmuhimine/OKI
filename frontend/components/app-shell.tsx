@@ -9,7 +9,7 @@ import {
   Star, Mail, MessageSquare, Lightbulb, TrendingUp,
   BarChart2, Infinity, Sun, Moon, Search, Bell,
   LogOut, ChevronDown, Plus, Settings, HelpCircle, PanelLeft, X,
-  Building2, User, FileText, ArrowRight, Loader2,
+  Building2, User, FileText, ArrowRight, Loader2, BrainCircuit, AlertTriangle,
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 import { NotificationPanel } from "@/components/notification-panel";
@@ -20,7 +20,8 @@ import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 const primaryNav = [
   { href: "/dashboard", label: "Workbench",  icon: LayoutDashboard, badge: "3" },
   { href: "/customers", label: "Customers",  icon: Users },
-  { href: "/leads",     label: "OKKI Leads", icon: Zap },
+  { href: "/dashboard/ai-monitor", label: "AI Intelligence", icon: BrainCircuit },
+  { href: "/dashboard/ai-notification", label: "AI Notification", icon: AlertTriangle },
   { href: "/orders",    label: "Trading",    icon: ShoppingCart },
 ];
 
@@ -147,7 +148,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full bg-amber-400 dark:bg-amber-300" />
                 )}
                 <Icon size={18} strokeWidth={active ? 2 : 1.7} />
-                <span className="leading-tight">{item.label}</span>
+                <span className="max-w-[58px] text-center leading-tight">{item.label}</span>
                 {item.badge ? (
                   <span className="absolute right-1.5 top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-400 px-1 text-[9px] font-bold text-slate-900 shadow-[0_0_10px_rgba(251,191,36,0.35)]">
                     {item.badge}

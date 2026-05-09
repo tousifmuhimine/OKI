@@ -315,6 +315,13 @@ class MonitorStatusResponse(BaseModel):
     error: str | None = None
     configs: list[dict[str, Any]] = []
     recent_events: list[dict[str, Any]] = []
+    intent_breakdown: dict[str, int] = {}
+    engagement_breakdown: dict[str, int] = {}
+    trust_level_breakdown: dict[str, int] = {}
+    lead_status_breakdown: dict[str, int] = {}
+    leads_with_budget: int = 0
+    active_leads_count: int = 0
+    closed_leads_count: int = 0
     events_today: int = 0
     events_this_week: int = 0
     handovers_today: int = 0
@@ -348,6 +355,50 @@ async def ai_monitor_status(
         })
         for ch, mode in (r.automation_modes or {}).items():
             automation_summary[ch] = mode
+
+    # Lead intelligence summaries for AI monitoring
+    intent_rows = (
+        await session.execute(
+            select(Lead.intent, func.count(Lead.id))
+            .where(Lead.intent.isnot(None), Lead.intent != "")
+            .group_by(Lead.intent)
+        )
+    ).all()
+    engagement_rows = (
+        await session.execute(
+            select(Lead.engagement, func.count(Lead.id))
+            .where(Lead.engagement.isnot(None), Lead.engagement != "")
+            .group_by(Lead.engagement)
+        )
+    ).all()
+    trust_rows = (
+        await session.execute(
+            select(Lead.trust_level, func.count(Lead.id))
+            .where(Lead.trust_level.isnot(None), Lead.trust_level != "")
+            .group_by(Lead.trust_level)
+        )
+    ).all()
+    lead_status_rows = (
+        await session.execute(
+            select(Lead.status, func.count(Lead.id)).group_by(Lead.status)
+        )
+    ).all()
+
+    leads_with_budget = (
+        await session.execute(
+            select(func.count(Lead.id)).where(Lead.budget_min.isnot(None))
+        )
+    ).scalar_one()
+    active_leads_count = (
+        await session.execute(
+            select(func.count(Lead.id)).where(Lead.status.notin_(["won", "lost"]))
+        )
+    ).scalar_one()
+    closed_leads_count = (
+        await session.execute(
+            select(func.count(Lead.id)).where(Lead.status.in_(["won", "lost"]))
+        )
+    ).scalar_one()
 
     # Recent events (last 50)
     event_rows = (
@@ -422,6 +473,13 @@ async def ai_monitor_status(
         error=None,
         configs=configs,
         recent_events=recent_events,
+        intent_breakdown={row[0]: row[1] for row in intent_rows},
+        engagement_breakdown={row[0]: row[1] for row in engagement_rows},
+        trust_level_breakdown={row[0]: row[1] for row in trust_rows},
+        lead_status_breakdown={row[0]: row[1] for row in lead_status_rows},
+        leads_with_budget=leads_with_budget,
+        active_leads_count=active_leads_count,
+        closed_leads_count=closed_leads_count,
         events_today=events_today,
         events_this_week=events_this_week,
         handovers_today=handovers_today,
