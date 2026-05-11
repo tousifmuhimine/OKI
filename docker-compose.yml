@@ -1,6 +1,5 @@
 services:
-  # FastAPI backend for the OKI CRM API. The frontend is intentionally not
-  # dockerized yet; keep running it from /frontend with npm run dev.
+  # ── Backend (FastAPI + Python 3.14) ──────────────────────────────────
   backend:
     build:
       context: ./backend
@@ -18,8 +17,26 @@ services:
       - redis
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
-  # Redis is included now for upcoming background jobs, websocket fan-out, and
-  # inbox event processing. The current backend can run without consuming it.
+  # ── Frontend (Next.js + Node 22) ────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+    container_name: oki-crm-frontend
+    env_file:
+      - path: ./frontend/.env.local
+        required: false
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - backend
+    command: npm run dev -- -H 0.0.0.0
+
+  # ── Redis (cache / background jobs / websockets) ────────────────────
+  # Not consumed by the app yet, but ready for when you need it.
   redis:
     image: redis:7-alpine
     container_name: oki-crm-redis
