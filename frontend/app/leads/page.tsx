@@ -4,11 +4,14 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   ArrowLeft,
+  Activity,
   BarChart3,
   Building2,
   CheckCircle2,
   CircleDollarSign,
   Columns3,
+  Edit2,
+  Eye,
   Filter,
   LayoutList,
   Mail,
@@ -20,6 +23,7 @@ import {
   Sparkles,
   RefreshCw,
   Search,
+  Trash2,
   User,
   Zap,
   X,
@@ -98,6 +102,8 @@ export default function LeadsPage() {
   const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
   // Industry-specific data extracted by AI or entered manually
   const [industryData, setIndustryData] = useState<Record<string, unknown> | null>(null);
+  const [leadSidebarTab, setLeadSidebarTab] = useState<"details" | "activity" | "edit">("details");
+  const [quickFilter, setQuickFilter] = useState("all");
 
   // Budget modal state (shown before conversion)
   const [budgetModalLeadId, setBudgetModalLeadId] = useState<string | null>(null);
@@ -195,25 +201,6 @@ export default function LeadsPage() {
   }
 
   useEffect(() => { void loadLeads(); }, []);
-
-  useEffect(() => {
-    const media = window.matchMedia("(min-width: 1024px)");
-    function syncView(event: MediaQueryList | MediaQueryListEvent) {
-      setViewMode((current) => {
-        if ("matches" in event && event.matches && current === "list") {
-          return "board";
-        }
-        if ("matches" in event && !event.matches && current === "board") {
-          return "list";
-        }
-        return current;
-      });
-    }
-
-    syncView(media);
-    media.addEventListener("change", syncView);
-    return () => media.removeEventListener("change", syncView);
-  }, []);
 
   useEffect(() => {
     const media = window.matchMedia("(min-width: 1024px)");
@@ -427,7 +414,7 @@ export default function LeadsPage() {
                 Back
               </button>
             ) : null}
-            <p className="text-xs font-semibold uppercase tracking-widest text-brand-500">Lead detail</p>
+            <p className="text-xs font-semibold uppercase tracking-widest text-brand-500">Lead profile</p>
             <h2 className="mt-1 truncate text-xl font-bold text-slate-900 dark:text-white">{selectedLead.company_name}</h2>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{selectedLead.contact_person ?? "No contact person"}</p>
           </div>
@@ -436,131 +423,224 @@ export default function LeadsPage() {
           </span>
         </div>
 
-        <dl className="mt-5 grid gap-3 text-sm">
-          <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
-            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Source</dt>
-            <dd className="mt-1 text-slate-900 dark:text-white">{selectedLead.source ?? "Unsourced"}</dd>
-          </div>
-          <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
-            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Industry</dt>
-            <dd className="mt-1 capitalize text-slate-900 dark:text-white">{selectedLead.industry?.replace(/_/g, " ") ?? "—"}</dd>
-          </div>
-          {selectedLead.email && (
-            <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
-              <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Email</dt>
-              <dd className="mt-1 truncate text-slate-900 dark:text-white">{selectedLead.email}</dd>
-            </div>
-          )}
-          {selectedLead.phone && (
-            <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
-              <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Phone</dt>
-              <dd className="mt-1 text-slate-900 dark:text-white">{selectedLead.phone}</dd>
-            </div>
-          )}
-          <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
-            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Owner</dt>
-            <dd className="mt-1 truncate text-slate-900 dark:text-white">{selectedLead.assigned_user_id ?? "Unassigned"}</dd>
-          </div>
-          <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
-            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Created</dt>
-            <dd className="mt-1 text-slate-900 dark:text-white">{formatDate(selectedLead.created_at)}</dd>
-          </div>
-        </dl>
-
-        <div className="mt-4 rounded-xl border border-brand-200/40 bg-brand-50/60 p-3 dark:border-brand-500/20 dark:bg-brand-500/10">
-          <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-brand-600 dark:text-brand-400">
-            <Sparkles size={12} />
-            Lead signals
-          </p>
-          <div className="flex flex-wrap gap-2 text-[11px] font-semibold">
-            <span className="rounded-lg bg-white/80 px-2.5 py-1 text-slate-700 dark:bg-white/10 dark:text-slate-200">
-              Intent: {compactSignal(selectedLead.intent, "Unknown")}
-            </span>
-            <span className="rounded-lg bg-white/80 px-2.5 py-1 text-slate-700 dark:bg-white/10 dark:text-slate-200">
-              Engagement: {compactSignal(selectedLead.engagement, "Unknown")}
-            </span>
-            <span className="rounded-lg bg-white/80 px-2.5 py-1 text-slate-700 dark:bg-white/10 dark:text-slate-200">
-              Trust: {compactSignal(selectedLead.trust_level, "Unknown")}
-            </span>
-            {selectedLead.last_summary ? (
-              <span className="rounded-lg bg-white/80 px-2.5 py-1 text-slate-700 dark:bg-white/10 dark:text-slate-200">
-                Summary: {selectedLead.last_summary}
-              </span>
-            ) : null}
-          </div>
+        {/* Dynamic Sidebar Navigation Tabs */}
+        <div className="mt-4 flex w-full border-b border-white/20 dark:border-white/10">
+          {(["details", "activity", "edit"] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setLeadSidebarTab(tab)}
+              className={`flex-1 pb-2 text-xs font-bold uppercase tracking-widest transition-colors ${
+                leadSidebarTab === tab
+                  ? "border-b-2 border-brand-500 text-brand-600 dark:text-brand-400"
+                  : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
         </div>
 
-        {/* Industry-specific data panel */}
-        {selectedLead.industry_data && Object.keys(selectedLead.industry_data).length > 0 && (
-          <div className="mt-4 rounded-xl border border-brand-200/40 bg-brand-50/60 p-3 dark:border-brand-500/20 dark:bg-brand-500/10">
-            <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-brand-600 dark:text-brand-400">
-              <Sparkles size={12} />
-              Industry Profile
-            </p>
-            <dl className="grid gap-2">
-              {Object.entries(selectedLead.industry_data).map(([key, value]) =>
-                value !== null && value !== undefined && String(value).trim() !== "" ? (
-                  <div key={key} className="flex items-start justify-between gap-2 text-xs">
-                    <dt className="capitalize text-slate-500 dark:text-slate-400">{key.replace(/_/g, " ")}</dt>
-                    <dd className="font-semibold text-right text-slate-800 dark:text-slate-100">{String(value)}</dd>
-                  </div>
-                ) : null
+        {leadSidebarTab === "details" && (
+          <div className="animate-fade-in">
+            <dl className="mt-5 grid gap-3 text-sm">
+              <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Source</dt>
+                <dd className="mt-1 text-slate-900 dark:text-white">{selectedLead.source ?? "Unsourced"}</dd>
+              </div>
+              <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Industry</dt>
+                <dd className="mt-1 capitalize text-slate-900 dark:text-white">{selectedLead.industry?.replace(/_/g, " ") ?? "—"}</dd>
+              </div>
+              {selectedLead.email && (
+                <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Email</dt>
+                  <dd className="mt-1 truncate text-slate-900 dark:text-white">{selectedLead.email}</dd>
+                </div>
               )}
+              {selectedLead.phone && (
+                <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Phone</dt>
+                  <dd className="mt-1 text-slate-900 dark:text-white">{selectedLead.phone}</dd>
+                </div>
+              )}
+              <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Owner</dt>
+                <dd className="mt-1 truncate text-slate-900 dark:text-white">{selectedLead.assigned_user_id ?? "Unassigned"}</dd>
+              </div>
+              <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Created</dt>
+                <dd className="mt-1 text-slate-900 dark:text-white">{formatDate(selectedLead.created_at)}</dd>
+              </div>
             </dl>
-          </div>
-        )}
 
-        {/* Raw note audit trail */}
-        {selectedLead.raw_note && (
-          <details className="mt-3 rounded-xl border border-dashed border-slate-200/60 dark:border-white/10">
-            <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
-              <FileText size={11} className="mr-1 inline" /> Raw Agent Note
-            </summary>
-            <p className="px-3 pb-3 pt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-400">{selectedLead.raw_note}</p>
-          </details>
-        )}
+            <div className="mt-4 rounded-xl border border-brand-200/40 bg-brand-50/60 p-3 dark:border-brand-500/20 dark:bg-brand-500/10">
+              <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-brand-600 dark:text-brand-400">
+                <Sparkles size={12} />
+                Lead signals
+              </p>
+              <div className="flex flex-wrap gap-2 text-[11px] font-semibold">
+                <span className="rounded-lg bg-white/80 px-2.5 py-1 text-slate-700 dark:bg-white/10 dark:text-slate-200">
+                  Intent: {compactSignal(selectedLead.intent, "Unknown")}
+                </span>
+                <span className="rounded-lg bg-white/80 px-2.5 py-1 text-slate-700 dark:bg-white/10 dark:text-slate-200">
+                  Engagement: {compactSignal(selectedLead.engagement, "Unknown")}
+                </span>
+                <span className="rounded-lg bg-white/80 px-2.5 py-1 text-slate-700 dark:bg-white/10 dark:text-slate-200">
+                  Trust: {compactSignal(selectedLead.trust_level, "Unknown")}
+                </span>
+                {selectedLead.last_summary ? (
+                  <span className="rounded-lg bg-white/80 px-2.5 py-1 text-slate-700 dark:bg-white/10 dark:text-slate-200">
+                    Summary: {selectedLead.last_summary}
+                  </span>
+                ) : null}
+              </div>
+            </div>
 
-        <div className="mt-5">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Move status</p>
-          <div className="grid grid-cols-2 gap-2">
-            {statuses.map((item) => (
+            {/* Industry-specific data panel */}
+            {selectedLead.industry_data && Object.keys(selectedLead.industry_data).length > 0 && (
+              <div className="mt-4 rounded-xl border border-brand-200/40 bg-brand-50/60 p-3 dark:border-brand-500/20 dark:bg-brand-500/10">
+                <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-brand-600 dark:text-brand-400">
+                  <Sparkles size={12} />
+                  Industry Profile
+                </p>
+                <dl className="grid gap-2">
+                  {Object.entries(selectedLead.industry_data).map(([key, value]) =>
+                    value !== null && value !== undefined && String(value).trim() !== "" ? (
+                      <div key={key} className="flex items-start justify-between gap-2 text-xs">
+                        <dt className="capitalize text-slate-500 dark:text-slate-400">{key.replace(/_/g, " ")}</dt>
+                        <dd className="font-semibold text-right text-slate-800 dark:text-slate-100">{String(value)}</dd>
+                      </div>
+                    ) : null
+                  )}
+                </dl>
+              </div>
+            )}
+
+            {/* Raw note audit trail */}
+            {selectedLead.raw_note && (
+              <details className="mt-3 rounded-xl border border-dashed border-slate-200/60 dark:border-white/10">
+                <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
+                  <FileText size={11} className="mr-1 inline" /> Raw Agent Note
+                </summary>
+                <p className="px-3 pb-3 pt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-400">{selectedLead.raw_note}</p>
+              </details>
+            )}
+
+            <div className="mt-5">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Move status</p>
+              <div className="grid grid-cols-2 gap-2">
+                {statuses.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => void updateLead(selectedLead.id, { status: item.key })}
+                    disabled={savingId === selectedLead.id || selectedLead.status === item.key}
+                    className={`h-11 rounded-xl text-xs font-bold transition active:scale-95 disabled:opacity-50 sm:h-10 ${item.tone}`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-2">
               <button
-                key={item.key}
                 type="button"
-                onClick={() => void updateLead(selectedLead.id, { status: item.key })}
-                disabled={savingId === selectedLead.id || selectedLead.status === item.key}
-                className={`h-11 rounded-xl text-xs font-bold transition active:scale-95 disabled:opacity-50 sm:h-10 ${item.tone}`}
+                disabled={savingId === selectedLead.id || Boolean(selectedLead.converted_customer_id)}
+                onClick={() => {
+                  if (selectedLead.converted_customer_id) return;
+                  setBudgetInput("");
+                  setBudgetModalLeadId(selectedLead.id);
+                }}
+                className="flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-500 text-sm font-semibold text-white transition hover:bg-emerald-600 active:scale-95 disabled:opacity-60"
               >
-                {item.label}
+                {savingId === selectedLead.id ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
+                {selectedLead.converted_customer_id ? "Converted ✓" : "Convert to Customer"}
               </button>
-            ))}
+              <button
+                type="button"
+                className="flex h-11 items-center justify-center gap-2 rounded-xl bg-white/45 text-sm font-semibold text-slate-700 transition hover:bg-white/70 dark:bg-white/10 dark:text-slate-200 dark:hover:bg-white/15"
+                title="The current lead table has no dedicated email field yet."
+              >
+                <Mail size={16} />
+                Email follow-up
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
-        <div className="mt-5 grid gap-2">
-          <button
-            type="button"
-            disabled={savingId === selectedLead.id || Boolean(selectedLead.converted_customer_id)}
-            onClick={() => {
-              if (selectedLead.converted_customer_id) return;
-              setBudgetInput("");
-              setBudgetModalLeadId(selectedLead.id);
-            }}
-            className="flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-500 text-sm font-semibold text-white transition hover:bg-emerald-600 active:scale-95 disabled:opacity-60"
-          >
-            {savingId === selectedLead.id ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
-            {selectedLead.converted_customer_id ? "Converted ✓" : "Convert to Customer"}
-          </button>
-          <button
-            type="button"
-            className="flex h-11 items-center justify-center gap-2 rounded-xl bg-white/45 text-sm font-semibold text-slate-700 transition hover:bg-white/70 dark:bg-white/10 dark:text-slate-200 dark:hover:bg-white/15"
-            title="The current lead table has no dedicated email field yet."
-          >
-            <Mail size={16} />
-            Email follow-up
-          </button>
-        </div>
+        {leadSidebarTab === "activity" && (
+          <div className="animate-fade-in mt-5 space-y-4">
+            <p className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3">Conversation History</p>
+            <div className="relative pl-3 border-l-2 border-white/20 dark:border-white/10 space-y-6">
+              <div className="relative">
+                <div className="absolute -left-[19px] top-1 h-3 w-3 rounded-full bg-brand-500 ring-4 ring-white dark:ring-slate-900" />
+                <p className="text-[10px] font-bold text-slate-400">Today, 10:45 AM</p>
+                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 mt-1">Outbound Call Logged</p>
+                <div className="mt-2 rounded-xl bg-white/50 p-3 text-xs text-slate-600 dark:bg-white/5 dark:text-slate-300">
+                  <span className="font-bold text-brand-600 dark:text-brand-400 mr-2">Agent:</span>
+                  Left a voicemail regarding their inquiry on our new pricing plan. Scheduled a follow-up for tomorrow.
+                </div>
+              </div>
+              <div className="relative">
+                <div className="absolute -left-[19px] top-1 h-3 w-3 rounded-full bg-slate-300 ring-4 ring-white dark:bg-slate-700 dark:ring-slate-900" />
+                <p className="text-[10px] font-bold text-slate-400">Yesterday, 02:15 PM</p>
+                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 mt-1">WhatsApp Message</p>
+                <div className="mt-2 rounded-xl bg-emerald-50 p-3 text-xs text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-200">
+                  <span className="font-bold mr-2">Client:</span>
+                  "Can you send me more details about the setup process?"
+                </div>
+              </div>
+              <div className="relative">
+                <div className="absolute -left-[19px] top-1 h-3 w-3 rounded-full bg-slate-300 ring-4 ring-white dark:bg-slate-700 dark:ring-slate-900" />
+                <p className="text-[10px] font-bold text-slate-400">Yesterday, 10:00 AM</p>
+                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 mt-1">Lead Created</p>
+                <div className="mt-2 rounded-xl bg-white/50 p-3 text-xs text-slate-600 dark:bg-white/5 dark:text-slate-300">
+                  Lead was created manually by Admin.
+                </div>
+              </div>
+            </div>
+            
+            <div className="mt-8">
+              <textarea 
+                className="w-full rounded-xl border border-white/50 bg-white/50 p-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+                placeholder="Type a new message or log a call..."
+                rows={3}
+              />
+              <div className="mt-2 flex gap-2">
+                <button className="flex-1 rounded-xl bg-brand-600 py-2.5 text-xs font-bold text-white transition hover:bg-brand-500">Log Call</button>
+                <button className="flex-1 rounded-xl bg-indigo-600 py-2.5 text-xs font-bold text-white transition hover:bg-indigo-500">Send Message</button>
+              </div>
+            </div>
+          </div>
+        )}
 
+        {leadSidebarTab === "edit" && (
+          <div className="animate-fade-in mt-5 space-y-4">
+            <p className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3">Edit Lead Information</p>
+            <div className="space-y-3">
+              <label className="block">
+                <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Company Name</span>
+                <input defaultValue={selectedLead.company_name} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+              </label>
+              <label className="block">
+                <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Contact Person</span>
+                <input defaultValue={selectedLead.contact_person ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+              </label>
+              <label className="block">
+                <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Phone</span>
+                <input defaultValue={selectedLead.phone ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+              </label>
+              <label className="block">
+                <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Email</span>
+                <input defaultValue={selectedLead.email ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+              </label>
+              <button className="mt-4 w-full rounded-xl bg-brand-600 py-2.5 text-sm font-bold text-white shadow-glow transition hover:bg-brand-500">
+                Save Changes
+              </button>
+            </div>
+          </div>
+        )}
 
       </div>
     );
@@ -593,6 +673,27 @@ export default function LeadsPage() {
               Refresh
             </button>
           </div>
+        </div>
+
+        <div className="mb-6 flex gap-6 overflow-x-auto border-b border-white/20 dark:border-white/10 hide-scrollbar">
+          {[
+            { id: "all", label: "All Leads" },
+            { id: "assigned", label: "Assigned to Me" },
+            { id: "untouched", label: "Untouched Leads" },
+            { id: "followup", label: "Follow-ups Due" },
+          ].map(f => (
+            <button 
+              key={f.id}
+              onClick={() => setQuickFilter(f.id)}
+              className={`whitespace-nowrap pb-3 text-sm font-semibold transition-colors ${
+                quickFilter === f.id 
+                  ? 'border-b-2 border-brand-500 text-brand-600 dark:text-brand-400'
+                  : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
         </div>
 
         {error ? (
@@ -914,31 +1015,43 @@ export default function LeadsPage() {
           <div className="min-w-0 space-y-3">
             <div className="glass-card flex flex-wrap items-center gap-3 p-3">
               <div className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-xl border border-white/50 bg-white/50 px-3 dark:border-white/10 dark:bg-black/20 sm:h-10 sm:min-w-[220px]">
-                <Search size={15} className="text-slate-500" />
+                <Search size={15} className="text-slate-500 shrink-0" />
                 <input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:text-white"
-                  placeholder="Search leads"
+                  placeholder="Search by name | phone | email"
                   type="search"
                 />
               </div>
-              <div className={`flex w-full max-w-full items-center gap-2 overflow-x-auto sm:w-auto ${viewMode === 'board' ? 'hidden' : ''}`}>
-                <Filter size={15} className="shrink-0 text-slate-500" />
-                {["all", ...statuses.map((item) => item.key)].map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => setStatusFilter(item)}
-                    className={`h-10 shrink-0 rounded-lg px-3 text-xs font-semibold capitalize transition sm:h-9 ${
-                      statusFilter === item
-                        ? "bg-brand-500 text-white"
-                        : "bg-white/35 text-slate-600 hover:bg-white/60 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
-                    }`}
-                  >
-                    {item}
-                  </button>
-                ))}
+              <div className={`flex w-full flex-wrap items-center gap-2 sm:w-auto ${viewMode === 'board' ? 'hidden' : ''}`}>
+                <ThemedSelect 
+                  value={statusFilter} 
+                  onChange={setStatusFilter}
+                  icon={Filter}
+                  placeholder="-- Stat By Status --"
+                  className="w-48 h-10"
+                  options={[
+                    { value: "all", label: "-- Stat By Status --" },
+                    ...statuses.map((s) => ({ value: s.key, label: s.label }))
+                  ]}
+                />
+                <ThemedSelect 
+                  value={"desc"} 
+                  onChange={() => {}}
+                  icon={ArrowRight}
+                  placeholder="-- Sort By Date --"
+                  className="w-48 h-10"
+                  options={[
+                    { value: "desc", label: "-- Sort By Date --" },
+                    { value: "asc", label: "Oldest First" }
+                  ]}
+                />
+                <input type="date" className="h-10 rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-700 outline-none dark:border-white/10 dark:bg-black/20 dark:text-slate-200" />
+                <input type="date" className="h-10 rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-700 outline-none dark:border-white/10 dark:bg-black/20 dark:text-slate-200" />
+                <button className="h-10 rounded-xl bg-brand-600 px-5 text-sm font-semibold text-white shadow-glow transition hover:bg-brand-500">
+                  Filter
+                </button>
               </div>
             </div>
 
@@ -1045,43 +1158,55 @@ export default function LeadsPage() {
                   ) : null}
                 </div>
 
-                <div className="hidden overflow-hidden glass-card md:block">
-                  <table className="min-w-full">
+                <div className="hidden overflow-x-auto glass-card md:block rounded-xl">
+                  <table className="min-w-full whitespace-nowrap">
                   <thead>
-                    <tr className="border-b border-white/20 bg-white/20 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-400">
-                      <th className="px-5 py-3.5">Company</th>
-                      <th className="px-5 py-3.5">Contact</th>
-                      <th className="px-5 py-3.5">Source</th>
-                      <th className="px-5 py-3.5">Status</th>
-                      <th className="px-5 py-3.5">Updated</th>
+                    <tr className="border-b border-white/20 bg-white/20 text-left text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-slate-400">
+                      <th className="px-5 py-4">Date</th>
+                      <th className="px-5 py-4">Name</th>
+                      <th className="px-5 py-4">Phone</th>
+                      <th className="px-5 py-4">Profession</th>
+                      <th className="px-5 py-4">Stage</th>
+                      <th className="px-5 py-4">Assigned To</th>
+                      <th className="px-5 py-4">Created By</th>
+                      <th className="px-5 py-4 text-right">Action</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/20 dark:divide-white/10">
+                  <tbody className="divide-y divide-white/10">
                     {filteredLeads.map((lead) => (
                       <tr
                         key={lead.id}
-                        onClick={() => openLead(lead.id)}
-                        className="cursor-pointer transition hover:bg-white/40 dark:hover:bg-white/10"
+                        className="transition hover:bg-white/40 dark:hover:bg-white/10"
                       >
-                        <td className="px-5 py-3.5 font-medium text-slate-800 dark:text-slate-100">{lead.company_name}</td>
-                        <td className="px-5 py-3.5 text-sm text-slate-600 dark:text-slate-300">{lead.contact_person ?? "-"}</td>
-                        <td className="px-5 py-3.5 text-sm text-slate-600 dark:text-slate-300">
-                          <div className="flex items-center gap-2">
-                            <SourceIcon source={lead.source} className="h-4 w-4 text-slate-400" />
-                            <span className="capitalize">{lead.source ?? "-"}</span>
-                            {lead.capture_source === "auto" && (
-                              <span className="rounded bg-brand-100 px-1.5 py-0.5 text-[10px] font-bold text-brand-600 dark:bg-brand-500/20 dark:text-brand-300">
-                                AUTO
-                              </span>
-                            )}
-                          </div>
+                        <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">{formatDate(lead.created_at)}</td>
+                        <td className="px-5 py-4 text-sm font-semibold text-slate-800 dark:text-slate-100">{lead.company_name}</td>
+                        <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">{lead.phone || "-"}</td>
+                        <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300 capitalize">
+                           {(lead.industry_data as any)?.profession || lead.industry || "—"}
                         </td>
-                        <td className="px-5 py-3.5">
-                          <span className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold ${statusTone(lead.status)}`}>
+                        <td className="px-5 py-4">
+                          <span className={`rounded-lg px-2.5 py-1 text-[11px] font-bold ${statusTone(lead.status)}`}>
                             {lead.status}
                           </span>
                         </td>
-                        <td className="px-5 py-3.5 text-sm text-slate-500">{formatDate(lead.updated_at)}</td>
+                        <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">{lead.assigned_user_id || "-"}</td>
+                        <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">Admin</td>
+                        <td className="px-5 py-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5 text-slate-400">
+                            <button onClick={() => { setLeadSidebarTab("activity"); openLead(lead.id); }} className="rounded p-1.5 hover:bg-white/60 hover:text-brand-500 dark:hover:bg-white/10">
+                              <Activity size={16} />
+                            </button>
+                            <button onClick={() => { setLeadSidebarTab("details"); openLead(lead.id); }} className="rounded p-1.5 hover:bg-white/60 hover:text-brand-500 dark:hover:bg-white/10">
+                              <Eye size={16} />
+                            </button>
+                            <button onClick={() => { setLeadSidebarTab("edit"); openLead(lead.id); }} className="rounded p-1.5 hover:bg-white/60 hover:text-brand-500 dark:hover:bg-white/10">
+                              <Edit2 size={16} />
+                            </button>
+                            <button className="rounded p-1.5 hover:bg-rose-500/10 hover:text-rose-500">
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
