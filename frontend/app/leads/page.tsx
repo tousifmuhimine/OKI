@@ -35,7 +35,16 @@ import {
 
 import { ProtectedPage } from "@/components/protected-page";
 import { apiRequest } from "@/lib/api";
-import { Customer, Lead, LeadListResponse } from "@/types/crm";
+import {
+  Customer,
+  Lead,
+  LeadActivity,
+  LeadListResponse,
+  LeadNamedConfig,
+  LeadSourceConfig,
+  LeadStageConfig,
+  LeadTimelineItem,
+} from "@/types/crm";
 
 type LeadAnalyticsSummary = {
   total: number;
@@ -56,12 +65,57 @@ const statuses = [
   { key: "lost", label: "Lost", tone: "bg-slate-500/15 text-slate-600 dark:text-slate-300" },
 ];
 
+const suggestedTags = ["vip", "hot", "follow-up", "inbound", "upsell"];
+
+type LeadConfigs = {
+  sources: LeadSourceConfig[];
+  stages: LeadStageConfig[];
+  sectors: LeadNamedConfig[];
+  areas: LeadNamedConfig[];
+  professions: LeadNamedConfig[];
+};
+
 function statusTone(status: string) {
   return statuses.find((item) => item.key === status)?.tone ?? statuses[0].tone;
 }
 
+function stageTone(stageName: string | null | undefined, fallbackStatus?: string) {
+  const key = (stageName || fallbackStatus || "new").toLowerCase().replace(/\s+/g, "_");
+  if (key.includes("won") || key.includes("closed")) return "bg-lime-500/15 text-lime-700 dark:text-lime-300";
+  if (key.includes("lost")) return "bg-slate-500/15 text-slate-600 dark:text-slate-300";
+  if (key.includes("proposal")) return "bg-amber-500/15 text-amber-700 dark:text-amber-300";
+  if (key.includes("qualified") || key.includes("interested")) return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300";
+  if (key.includes("contact")) return "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300";
+  return "bg-blue-500/15 text-blue-700 dark:text-blue-300";
+}
+
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(value));
+}
+
+function normalizeTagValue(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function splitTags(raw: string) {
+  return raw.split(/[\n,]/).map(normalizeTagValue).filter(Boolean);
+}
+
+function mergeTags(existing: string[], incoming: string[]) {
+  const seen = new Set(existing.map((tag) => tag.toLowerCase()));
+  const merged = [...existing];
+  for (const tag of incoming) {
+    const normalized = tag.toLowerCase();
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      merged.push(normalized);
+    }
+  }
+  return merged;
+}
+
+function tagLabel(tag: string) {
+  return tag.replace(/[_-]/g, " ");
 }
 
 function SourceIcon({ source, className = "h-4 w-4" }: { source: string | null; className?: string }) {
@@ -79,6 +133,11 @@ function compactSignal(value: string | null | undefined, fallback: string) {
   return String(value).replace(/_/g, " ");
 }
 
+function apiDate(value: string, endOfDay = false) {
+  if (!value) return "";
+  return `${value}T${endOfDay ? "23:59:59" : "00:00:00"}`;
+}
+
 export default function LeadsPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [analytics, setAnalytics] = useState<LeadAnalyticsSummary | null>(null);
@@ -86,6 +145,12 @@ export default function LeadsPage() {
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [sourceFilter, setSourceFilter] = useState("all");
+  const [priorityFilter, setPriorityFilter] = useState("all");
+  const [tagFilter, setTagFilter] = useState("all");
+  const [sortOrder, setSortOrder] = useState("desc");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [contactPerson, setContactPerson] = useState("");
   const [phone, setPhone] = useState("");
@@ -93,6 +158,13 @@ export default function LeadsPage() {
   const [address, setAddress] = useState("");
   const [industry, setIndustry] = useState("");
   const [source, setSource] = useState("manual");
+  const [leadSourceId, setLeadSourceId] = useState("");
+  const [leadStageId, setLeadStageId] = useState("");
+  const [leadAreaId, setLeadAreaId] = useState("");
+  const [leadProfessionId, setLeadProfessionId] = useState("");
+  const [leadPriority, setLeadPriority] = useState("medium");
+  const [leadTags, setLeadTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState("");
   const [rawNotes, setRawNotes] = useState("");
   const [convertingNotes, setConvertingNotes] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -104,6 +176,15 @@ export default function LeadsPage() {
   const [industryData, setIndustryData] = useState<Record<string, unknown> | null>(null);
   const [leadSidebarTab, setLeadSidebarTab] = useState<"details" | "activity" | "edit">("details");
   const [quickFilter, setQuickFilter] = useState("all");
+  const [configs, setConfigs] = useState<LeadConfigs>({ sources: [], stages: [], sectors: [], areas: [], professions: [] });
+  const [activities, setActivities] = useState<LeadTimelineItem[]>([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityNote, setActivityNote] = useState("");
+  const [activityPlatform, setActivityPlatform] = useState("phone");
+  const [followUpDate, setFollowUpDate] = useState("");
+  const [aiInstructions, setAiInstructions] = useState("");
+  const [editTags, setEditTags] = useState<string[]>([]);
+  const [editTagInput, setEditTagInput] = useState("");
 
   // Budget modal state (shown before conversion)
   const [budgetModalLeadId, setBudgetModalLeadId] = useState<string | null>(null);
@@ -151,7 +232,7 @@ export default function LeadsPage() {
 
         {isOpen && (
           <>
-            <div className="absolute left-0 right-0 top-full z-[60] mt-2 animate-scale-in overflow-hidden rounded-xl border border-white/20 bg-white/95 p-1 shadow-2xl backdrop-blur-2xl dark:border-white/10 dark:bg-slate-900/95">
+            <div className="absolute left-0 right-0 top-full z-[80] mt-2 animate-scale-in overflow-hidden rounded-xl border border-white/20 bg-white/95 p-1 shadow-2xl backdrop-blur-2xl dark:border-white/10 dark:bg-slate-900/95">
               {options.map((opt) => (
                 <button
                   key={opt.value}
@@ -170,7 +251,7 @@ export default function LeadsPage() {
                 </button>
               ))}
             </div>
-            <div className="fixed inset-0 z-50 cursor-default" onClick={() => setIsOpen(false)} />
+            <div className="fixed inset-0 z-[70] cursor-default" onClick={() => setIsOpen(false)} />
           </>
         )}
       </div>
@@ -179,10 +260,33 @@ export default function LeadsPage() {
   // --- END CUSTOM THEMED SELECT ---
 
   const selectedLead = leads.find((lead) => lead.id === selectedId) ?? leads[0] ?? null;
+  const selectedStage = selectedLead?.lead_stage_id ? configs.stages.find((stage) => stage.id === selectedLead.lead_stage_id) : null;
+  const selectedSource = selectedLead?.lead_source_id ? configs.sources.find((item) => item.id === selectedLead.lead_source_id) : null;
+  const selectedArea = selectedLead?.lead_area_id ? configs.areas.find((item) => item.id === selectedLead.lead_area_id) : null;
+  const selectedProfession = selectedLead?.lead_profession_id ? configs.professions.find((item) => item.id === selectedLead.lead_profession_id) : null;
+  const dynamicStages: { key: string; label: string; tone: string; id?: string }[] = configs.stages.length
+    ? configs.stages.map((stage) => ({
+        key: stage.name.toLowerCase().replace(/\s+/g, "_"),
+        label: stage.name,
+        tone: stageTone(stage.name),
+        id: stage.id,
+      }))
+    : statuses.map((status) => ({ ...status, id: undefined }));
 
   async function loadLeads() {
     try {
-      const leadResponse = await apiRequest<LeadListResponse>("/leads?limit=100&offset=0");
+      const params = new URLSearchParams({ limit: "100", offset: "0", sort: sortOrder });
+      if (query.trim()) params.set("search", query.trim());
+      if (statusFilter !== "all") params.set(configs.stages.some((stage) => stage.id === statusFilter) ? "stage_id" : "status", statusFilter);
+      if (sourceFilter !== "all") params.set("source_id", sourceFilter);
+      if (priorityFilter !== "all") params.set("priority", priorityFilter);
+      if (tagFilter !== "all") params.set("tag", tagFilter);
+      if (quickFilter !== "all") {
+        params.set("quick_filter", quickFilter === "assigned" ? "assigned_to_me" : quickFilter === "followup" ? "followups_due" : quickFilter);
+      }
+      if (startDate) params.set("start_date", apiDate(startDate));
+      if (endDate) params.set("end_date", apiDate(endDate, true));
+      const leadResponse = await apiRequest<LeadListResponse>(`/leads?${params.toString()}`);
       let summaryResponse: LeadAnalyticsSummary | null = null;
       try {
         summaryResponse = await apiRequest<LeadAnalyticsSummary>("/leads/analytics/summary");
@@ -200,7 +304,50 @@ export default function LeadsPage() {
     }
   }
 
-  useEffect(() => { void loadLeads(); }, []);
+  async function loadConfigs() {
+    try {
+      const [sources, stages, sectors, areas, professions] = await Promise.all([
+        apiRequest<LeadSourceConfig[]>("/config/lead-sources?active_only=true"),
+        apiRequest<LeadStageConfig[]>("/config/lead-stages?active_only=true"),
+        apiRequest<LeadNamedConfig[]>("/config/lead-sectors?active_only=true"),
+        apiRequest<LeadNamedConfig[]>("/config/lead-areas?active_only=true"),
+        apiRequest<LeadNamedConfig[]>("/config/lead-professions?active_only=true"),
+      ]);
+      setConfigs({ sources, stages, sectors, areas, professions });
+      setLeadStageId((current) => current || stages[0]?.id || "");
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function loadActivities(leadId: string) {
+    setActivityLoading(true);
+    try {
+      const response = await apiRequest<LeadTimelineItem[]>(`/leads/${leadId}/timeline`);
+      setActivities(response);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setActivityLoading(false);
+    }
+  }
+
+  useEffect(() => { void loadConfigs(); }, []);
+  useEffect(() => { void loadLeads(); }, [quickFilter]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadLeads();
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [query, statusFilter, sourceFilter, priorityFilter, tagFilter, sortOrder, startDate, endDate, configs.stages.length]);
+  useEffect(() => {
+    if (!selectedLead) return;
+    setAiInstructions(selectedLead.ai_instructions ?? "");
+    setEditTags(selectedLead.tags ?? []);
+    if (leadSidebarTab === "activity") {
+      void loadActivities(selectedLead.id);
+    }
+  }, [selectedLead?.id, selectedLead?.ai_instructions, leadSidebarTab]);
 
   useEffect(() => {
     const media = window.matchMedia("(min-width: 1024px)");
@@ -225,28 +372,31 @@ export default function LeadsPage() {
   }, [mobileDetailOpen]);
 
   const filteredLeads = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return leads.filter((lead) => {
-      const statusMatches = statusFilter === "all" || (lead.status || "").toLowerCase() === statusFilter.toLowerCase();
-      const queryMatches = !needle || [lead.company_name, lead.contact_person, lead.source, lead.assigned_user_id]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(needle));
-      return statusMatches && queryMatches;
-    });
-  }, [leads, query, statusFilter]);
+    return leads;
+  }, [leads]);
 
   const groupedLeads = useMemo(() => {
-    return statuses.map((statusItem) => ({
+    return dynamicStages.map((statusItem) => ({
       ...statusItem,
-      leads: filteredLeads.filter((lead) => lead.status === statusItem.key),
+      leads: filteredLeads.filter((lead) => statusItem.id ? lead.lead_stage_id === statusItem.id : lead.status === statusItem.key),
     }));
-  }, [filteredLeads]);
+  }, [dynamicStages, filteredLeads]);
 
   const topSources = useMemo(() => {
     return Object.entries(analytics?.by_source ?? {})
       .sort((a, b) => b[1] - a[1])
       .slice(0, 4);
   }, [analytics]);
+
+  const availableTags = useMemo(() => {
+    const set = new Set(suggestedTags);
+    for (const lead of leads) {
+      for (const tag of lead.tags ?? []) {
+        if (tag) set.add(tag);
+      }
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [leads]);
 
   function handleDragStart(e: React.DragEvent, leadId: string) {
     e.dataTransfer.setData("text/plain", leadId);
@@ -261,13 +411,13 @@ export default function LeadsPage() {
     e.preventDefault();
   }
 
-  function handleDrop(e: React.DragEvent, statusKey: string) {
+  function handleDrop(e: React.DragEvent, statusKey: string, stageId?: string) {
     e.preventDefault();
     const leadId = e.dataTransfer.getData("text/plain");
     if (leadId) {
       const lead = leads.find(l => l.id === leadId);
-      if (lead && lead.status !== statusKey) {
-        void updateLead(leadId, { status: statusKey });
+      if (lead && (stageId ? lead.lead_stage_id !== stageId : lead.status !== statusKey)) {
+        void updateLead(leadId, stageId ? { lead_stage_id: stageId, status: statusKey } : { status: statusKey });
       }
     }
     setDraggedLeadId(null);
@@ -319,7 +469,13 @@ export default function LeadsPage() {
           address: address || null,
           industry: industry || null,
           source: source || null,
-          status: "new",
+          status: configs.stages.find((stage) => stage.id === leadStageId)?.name.toLowerCase().replace(/\s+/g, "_") || "new",
+          lead_source_id: leadSourceId || null,
+          lead_stage_id: leadStageId || null,
+          lead_area_id: leadAreaId || null,
+          lead_profession_id: leadProfessionId || null,
+          priority: leadPriority,
+          tags: leadTags.length ? leadTags : null,
           industry_data: industryData || null,
           raw_note: rawNotes || null, // Capture manual notes if any
         }),
@@ -331,6 +487,12 @@ export default function LeadsPage() {
       setAddress("");
       setIndustry("");
       setSource("manual");
+      setLeadSourceId("");
+      setLeadAreaId("");
+      setLeadProfessionId("");
+      setLeadPriority("medium");
+      setLeadTags([]);
+      setTagInput("");
       setIndustryData(null);
       setRawNotes("");
       setSelectedId(lead.id);
@@ -349,6 +511,20 @@ export default function LeadsPage() {
     }));
   };
 
+  const addLeadTags = (raw: string) => {
+    const nextTags = splitTags(raw);
+    if (nextTags.length) {
+      setLeadTags((current) => mergeTags(current, nextTags));
+    }
+  };
+
+  const addEditTags = (raw: string) => {
+    const nextTags = splitTags(raw);
+    if (nextTags.length) {
+      setEditTags((current) => mergeTags(current, nextTags));
+    }
+  };
+
   async function updateLead(leadId: string, payload: Partial<Lead>) {
     setSavingId(leadId);
     try {
@@ -359,6 +535,57 @@ export default function LeadsPage() {
       setLeads((current) => current.map((lead) => lead.id === updated.id ? updated : lead));
       await loadLeads();
       setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function deleteLead(leadId: string) {
+    const lead = leads.find((item) => item.id === leadId);
+    const ok = window.confirm(`Delete ${lead?.company_name ?? "this lead"}?`);
+    if (!ok) return;
+    setSavingId(leadId);
+    try {
+      await apiRequest(`/leads/${leadId}`, { method: "DELETE" });
+      await loadLeads();
+      setSelectedId((current) => current === leadId ? null : current);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function createLeadActivity(activityType: "call" | "message" | "follow_up") {
+    if (!selectedLead || !activityNote.trim()) return;
+    setSavingId(selectedLead.id);
+    try {
+      if (activityType === "message" && selectedLead.conversation_id) {
+        await apiRequest(`/inbox/conversations/${selectedLead.conversation_id}/messages`, {
+          method: "POST",
+          body: JSON.stringify({
+            content: activityNote,
+            metadata: { lead_id: selectedLead.id, platform: activityPlatform },
+          }),
+        });
+      } else {
+        await apiRequest<LeadActivity>(`/leads/${selectedLead.id}/activities`, {
+          method: "POST",
+          body: JSON.stringify({
+            activity_type: activityType,
+            direction: activityType === "message" ? "outgoing" : activityPlatform === "phone" ? "outbound" : null,
+            platform: activityPlatform,
+            title: activityType === "call" ? "Call logged" : activityType === "follow_up" ? "Follow-up scheduled" : "Message note",
+            content: activityNote,
+            due_at: activityType === "follow_up" && followUpDate ? apiDate(followUpDate, true) : null,
+          }),
+        });
+      }
+      setActivityNote("");
+      setFollowUpDate("");
+      await Promise.all([loadActivities(selectedLead.id), loadLeads()]);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -418,9 +645,16 @@ export default function LeadsPage() {
             <h2 className="mt-1 truncate text-xl font-bold text-slate-900 dark:text-white">{selectedLead.company_name}</h2>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{selectedLead.contact_person ?? "No contact person"}</p>
           </div>
-          <span className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-bold ${statusTone(selectedLead.status)}`}>
-            {selectedLead.status}
-          </span>
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            {selectedLead.untouched ? (
+              <span className="rounded-lg bg-rose-500/15 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-rose-600 dark:text-rose-300">
+                Untouched
+              </span>
+            ) : null}
+            <span className={`rounded-lg px-2.5 py-1 text-xs font-bold ${stageTone(selectedStage?.name, selectedLead.status)}`}>
+              {selectedStage?.name ?? selectedLead.status}
+            </span>
+          </div>
         </div>
 
         {/* Dynamic Sidebar Navigation Tabs */}
@@ -445,7 +679,33 @@ export default function LeadsPage() {
             <dl className="mt-5 grid gap-3 text-sm">
               <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
                 <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Source</dt>
-                <dd className="mt-1 text-slate-900 dark:text-white">{selectedLead.source ?? "Unsourced"}</dd>
+                <dd className="mt-1 text-slate-900 dark:text-white">{selectedSource?.name ?? selectedLead.source ?? "Unsourced"}</dd>
+              </div>
+              <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Priority</dt>
+                <dd className="mt-1 capitalize text-slate-900 dark:text-white">{selectedLead.priority ?? "medium"}</dd>
+              </div>
+              <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Tags</dt>
+                <dd className="mt-2 flex flex-wrap gap-2">
+                  {selectedLead.tags?.length ? (
+                    selectedLead.tags.map((tag) => (
+                      <span key={tag} className="rounded-full bg-brand-500/10 px-2.5 py-1 text-[11px] font-semibold text-brand-600 dark:text-brand-300">
+                        {tagLabel(tag)}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-xs text-slate-400">No tags yet</span>
+                  )}
+                </dd>
+              </div>
+              <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Area</dt>
+                <dd className="mt-1 text-slate-900 dark:text-white">{selectedArea?.name ?? "Unassigned"}</dd>
+              </div>
+              <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Profession</dt>
+                <dd className="mt-1 text-slate-900 dark:text-white">{selectedProfession?.name ?? (selectedLead.industry_data as any)?.profession ?? "Unassigned"}</dd>
               </div>
               <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
                 <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Industry</dt>
@@ -529,12 +789,12 @@ export default function LeadsPage() {
             <div className="mt-5">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Move status</p>
               <div className="grid grid-cols-2 gap-2">
-                {statuses.map((item) => (
+                {dynamicStages.map((item) => (
                   <button
                     key={item.key}
                     type="button"
-                    onClick={() => void updateLead(selectedLead.id, { status: item.key })}
-                    disabled={savingId === selectedLead.id || selectedLead.status === item.key}
+                    onClick={() => void updateLead(selectedLead.id, item.id ? { lead_stage_id: item.id, status: item.key } : { status: item.key })}
+                    disabled={savingId === selectedLead.id || (item.id ? selectedLead.lead_stage_id === item.id : selectedLead.status === item.key)}
                     className={`h-11 rounded-xl text-xs font-bold transition active:scale-95 disabled:opacity-50 sm:h-10 ${item.tone}`}
                   >
                     {item.label}
@@ -573,43 +833,73 @@ export default function LeadsPage() {
           <div className="animate-fade-in mt-5 space-y-4">
             <p className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3">Conversation History</p>
             <div className="relative pl-3 border-l-2 border-white/20 dark:border-white/10 space-y-6">
-              <div className="relative">
-                <div className="absolute -left-[19px] top-1 h-3 w-3 rounded-full bg-brand-500 ring-4 ring-white dark:ring-slate-900" />
-                <p className="text-[10px] font-bold text-slate-400">Today, 10:45 AM</p>
-                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 mt-1">Outbound Call Logged</p>
-                <div className="mt-2 rounded-xl bg-white/50 p-3 text-xs text-slate-600 dark:bg-white/5 dark:text-slate-300">
-                  <span className="font-bold text-brand-600 dark:text-brand-400 mr-2">Agent:</span>
-                  Left a voicemail regarding their inquiry on our new pricing plan. Scheduled a follow-up for tomorrow.
+              {activityLoading ? (
+                <div className="py-4 text-xs font-semibold text-slate-500">
+                  <Loader2 size={14} className="mr-2 inline animate-spin" />
+                  Loading timeline
                 </div>
-              </div>
-              <div className="relative">
-                <div className="absolute -left-[19px] top-1 h-3 w-3 rounded-full bg-slate-300 ring-4 ring-white dark:bg-slate-700 dark:ring-slate-900" />
-                <p className="text-[10px] font-bold text-slate-400">Yesterday, 02:15 PM</p>
-                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 mt-1">WhatsApp Message</p>
-                <div className="mt-2 rounded-xl bg-emerald-50 p-3 text-xs text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-200">
-                  <span className="font-bold mr-2">Client:</span>
-                  "Can you send me more details about the setup process?"
+              ) : activities.length ? (
+                activities.map((activity) => (
+                  <div className="relative" key={activity.id}>
+                    <div className={`absolute -left-[19px] top-1 h-3 w-3 rounded-full ring-4 ring-white dark:ring-slate-900 ${activity.item_type === "message" ? "bg-emerald-500" : "bg-brand-500"}`} />
+                    <p className="text-[10px] font-bold text-slate-400">{formatDate(activity.created_at)}</p>
+                    <p className="mt-1 text-sm font-semibold capitalize text-slate-800 dark:text-slate-100">
+                      {(activity.title || activity.activity_type || activity.item_type).replace(/_/g, " ")}
+                    </p>
+                    <div className="mt-2 rounded-xl bg-white/50 p-3 text-xs text-slate-600 dark:bg-white/5 dark:text-slate-300">
+                      <span className="mr-2 font-bold text-brand-600 dark:text-brand-400">
+                        {activity.platform || activity.direction || "Activity"}:
+                      </span>
+                      {activity.content || "No notes recorded."}
+                      {activity.due_at ? (
+                        <p className="mt-2 font-semibold text-amber-600 dark:text-amber-300">Due {formatDate(activity.due_at)}</p>
+                      ) : null}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="relative">
+                  <div className="absolute -left-[19px] top-1 h-3 w-3 rounded-full bg-slate-300 ring-4 ring-white dark:bg-slate-700 dark:ring-slate-900" />
+                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">No activity yet</p>
+                  <div className="mt-2 rounded-xl bg-white/50 p-3 text-xs text-slate-600 dark:bg-white/5 dark:text-slate-300">
+                    Log the first call, message, or follow-up for this lead.
+                  </div>
                 </div>
-              </div>
-              <div className="relative">
-                <div className="absolute -left-[19px] top-1 h-3 w-3 rounded-full bg-slate-300 ring-4 ring-white dark:bg-slate-700 dark:ring-slate-900" />
-                <p className="text-[10px] font-bold text-slate-400">Yesterday, 10:00 AM</p>
-                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 mt-1">Lead Created</p>
-                <div className="mt-2 rounded-xl bg-white/50 p-3 text-xs text-slate-600 dark:bg-white/5 dark:text-slate-300">
-                  Lead was created manually by Admin.
-                </div>
-              </div>
+              )}
             </div>
-            
+             
             <div className="mt-8">
+              <div className="mb-2 grid grid-cols-2 gap-2">
+                <ThemedSelect
+                  value={activityPlatform}
+                  onChange={setActivityPlatform}
+                  icon={MessageSquare}
+                  placeholder="Platform"
+                  options={[
+                    { value: "phone", label: "Phone" },
+                    { value: "whatsapp", label: "WhatsApp" },
+                    { value: "messenger", label: "Messenger" },
+                    { value: "website", label: "Web Widget" },
+                  ]}
+                />
+                <input
+                  type="date"
+                  value={followUpDate}
+                  onChange={(event) => setFollowUpDate(event.target.value)}
+                  className="h-11 rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-700 outline-none dark:border-white/10 dark:bg-black/20 dark:text-slate-200"
+                />
+              </div>
               <textarea 
+                value={activityNote}
+                onChange={(event) => setActivityNote(event.target.value)}
                 className="w-full rounded-xl border border-white/50 bg-white/50 p-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
                 placeholder="Type a new message or log a call..."
                 rows={3}
               />
               <div className="mt-2 flex gap-2">
-                <button className="flex-1 rounded-xl bg-brand-600 py-2.5 text-xs font-bold text-white transition hover:bg-brand-500">Log Call</button>
-                <button className="flex-1 rounded-xl bg-indigo-600 py-2.5 text-xs font-bold text-white transition hover:bg-indigo-500">Send Message</button>
+                <button type="button" onClick={() => void createLeadActivity("call")} disabled={!activityNote.trim()} className="flex-1 rounded-xl bg-brand-600 py-2.5 text-xs font-bold text-white transition hover:bg-brand-500 disabled:opacity-50">Log Call</button>
+                <button type="button" onClick={() => void createLeadActivity("message")} disabled={!activityNote.trim()} className="flex-1 rounded-xl bg-indigo-600 py-2.5 text-xs font-bold text-white transition hover:bg-indigo-500 disabled:opacity-50">Save Message</button>
+                <button type="button" onClick={() => void createLeadActivity("follow_up")} disabled={!activityNote.trim() || !followUpDate} className="flex-1 rounded-xl bg-amber-500 py-2.5 text-xs font-bold text-white transition hover:bg-amber-600 disabled:opacity-50">Follow-up</button>
               </div>
             </div>
           </div>
@@ -618,27 +908,132 @@ export default function LeadsPage() {
         {leadSidebarTab === "edit" && (
           <div className="animate-fade-in mt-5 space-y-4">
             <p className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3">Edit Lead Information</p>
-            <div className="space-y-3">
+            <form
+              className="space-y-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const form = new FormData(event.currentTarget);
+                const stageId = String(form.get("lead_stage_id") || "");
+                void updateLead(selectedLead.id, {
+                  company_name: String(form.get("company_name") || selectedLead.company_name),
+                  contact_person: String(form.get("contact_person") || "") || null,
+                  phone: String(form.get("phone") || "") || null,
+                  email: String(form.get("email") || "") || null,
+                  priority: String(form.get("priority") || "medium"),
+                  lead_stage_id: stageId || null,
+                  lead_area_id: String(form.get("lead_area_id") || "") || null,
+                  lead_profession_id: String(form.get("lead_profession_id") || "") || null,
+                  tags: editTags,
+                  ai_instructions: aiInstructions || null,
+                  status: configs.stages.find((stage) => stage.id === stageId)?.name.toLowerCase().replace(/\s+/g, "_") || selectedLead.status,
+                });
+              }}
+            >
               <label className="block">
                 <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Company Name</span>
-                <input defaultValue={selectedLead.company_name} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+                <input name="company_name" defaultValue={selectedLead.company_name} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
               </label>
               <label className="block">
                 <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Contact Person</span>
-                <input defaultValue={selectedLead.contact_person ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+                <input name="contact_person" defaultValue={selectedLead.contact_person ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
               </label>
               <label className="block">
                 <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Phone</span>
-                <input defaultValue={selectedLead.phone ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+                <input name="phone" defaultValue={selectedLead.phone ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
               </label>
               <label className="block">
                 <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Email</span>
-                <input defaultValue={selectedLead.email ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+                <input name="email" defaultValue={selectedLead.email ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
               </label>
-              <button className="mt-4 w-full rounded-xl bg-brand-600 py-2.5 text-sm font-bold text-white shadow-glow transition hover:bg-brand-500">
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block">
+                  <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Priority</span>
+                  <select name="priority" defaultValue={selectedLead.priority ?? "medium"} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white">
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Stage</span>
+                  <select name="lead_stage_id" defaultValue={selectedLead.lead_stage_id ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white">
+                    <option value="">No Stage</option>
+                    {configs.stages.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}
+                  </select>
+                </label>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block">
+                  <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Area</span>
+                  <select name="lead_area_id" defaultValue={selectedLead.lead_area_id ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white">
+                    <option value="">No Area</option>
+                    {configs.areas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Profession</span>
+                  <select name="lead_profession_id" defaultValue={selectedLead.lead_profession_id ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white">
+                    <option value="">No Profession</option>
+                    {configs.professions.map((profession) => <option key={profession.id} value={profession.id}>{profession.name}</option>)}
+                  </select>
+                </label>
+              </div>
+              <div className="rounded-2xl border border-white/20 bg-white/30 p-4 dark:border-white/10 dark:bg-white/5">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase text-slate-500">Tags</span>
+                  <span className="text-[10px] text-slate-400">Press Enter or comma to add</span>
+                </div>
+                <input
+                  value={editTagInput}
+                  onChange={(event) => setEditTagInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === ",") {
+                      event.preventDefault();
+                      addEditTags(editTagInput);
+                      setEditTagInput("");
+                    }
+                  }}
+                  className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+                  placeholder="vip, hot, follow-up"
+                />
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {editTags.length ? (
+                    editTags.map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => setEditTags((current) => current.filter((item) => item !== tag))}
+                        className="flex items-center gap-1 rounded-full bg-brand-500/10 px-3 py-1 text-[11px] font-semibold text-brand-600 transition hover:bg-brand-500/20 dark:text-brand-300"
+                      >
+                        {tagLabel(tag)}
+                        <X size={12} />
+                      </button>
+                    ))
+                  ) : (
+                    <span className="text-xs text-slate-400">No tags yet</span>
+                  )}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {suggestedTags.map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => setEditTags((current) => mergeTags(current, [tag]))}
+                      className="rounded-full border border-white/30 bg-white/60 px-3 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-white/80 dark:border-white/10 dark:bg-white/5 dark:text-slate-300"
+                    >
+                      + {tagLabel(tag)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <label className="block">
+                <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">AI Instructions</span>
+                <textarea value={aiInstructions} onChange={(event) => setAiInstructions(event.target.value)} rows={4} className="w-full rounded-xl border border-white/50 bg-white/50 px-3 py-2 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+              </label>
+              <button disabled={savingId === selectedLead.id} className="mt-4 w-full rounded-xl bg-brand-600 py-2.5 text-sm font-bold text-white shadow-glow transition hover:bg-brand-500 disabled:opacity-60">
                 Save Changes
               </button>
-            </div>
+            </form>
           </div>
         )}
 
@@ -857,16 +1252,53 @@ export default function LeadsPage() {
                       ]}
                     />
                     <ThemedSelect
-                      value={source}
-                      onChange={setSource}
+                      value={leadSourceId}
+                      onChange={(value) => {
+                        setLeadSourceId(value);
+                        setSource(configs.sources.find((item) => item.id === value)?.name || "manual");
+                      }}
                       icon={Globe}
                       placeholder="Source"
                       options={[
-                        { value: "manual", label: "Manual" },
-                        { value: "website", label: "Website" },
-                        { value: "outbound", label: "Outbound" },
-                        { value: "referral", label: "Referral" },
+                        { value: "", label: "Manual" },
+                        ...configs.sources.map((item) => ({ value: item.id, label: item.name })),
                       ]}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <ThemedSelect
+                      value={leadStageId}
+                      onChange={setLeadStageId}
+                      icon={Filter}
+                      placeholder="Stage"
+                      options={configs.stages.map((item) => ({ value: item.id, label: item.name }))}
+                    />
+                    <ThemedSelect
+                      value={leadPriority}
+                      onChange={setLeadPriority}
+                      icon={Zap}
+                      placeholder="Priority"
+                      options={[
+                        { value: "high", label: "High" },
+                        { value: "medium", label: "Medium" },
+                        { value: "low", label: "Low" },
+                      ]}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <ThemedSelect
+                      value={leadAreaId}
+                      onChange={setLeadAreaId}
+                      icon={Globe}
+                      placeholder="Area"
+                      options={[{ value: "", label: "No Area" }, ...configs.areas.map((item) => ({ value: item.id, label: item.name }))]}
+                    />
+                    <ThemedSelect
+                      value={leadProfessionId}
+                      onChange={setLeadProfessionId}
+                      icon={User}
+                      placeholder="Profession"
+                      options={[{ value: "", label: "No Profession" }, ...configs.professions.map((item) => ({ value: item.id, label: item.name }))]}
                     />
                   </div>
                   <label className="relative block">
@@ -879,6 +1311,57 @@ export default function LeadsPage() {
                     />
                   </label>
                 </div>
+              </div>
+            </div>
+
+            <div className="mt-6 rounded-2xl border border-white/20 bg-white/30 p-4 dark:border-white/10 dark:bg-white/5">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-brand-500">Tags</p>
+                <span className="text-[10px] text-slate-400">Press Enter or comma to add</span>
+              </div>
+              <label className="block">
+                <input
+                  value={tagInput}
+                  onChange={(event) => setTagInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === ",") {
+                      event.preventDefault();
+                      addLeadTags(tagInput);
+                      setTagInput("");
+                    }
+                  }}
+                  className="h-10 w-full rounded-xl border border-white/40 bg-white/60 px-3 text-sm text-slate-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-400/20 dark:border-white/10 dark:bg-black/30 dark:text-white"
+                  placeholder="vip, hot, follow-up"
+                />
+              </label>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {leadTags.length ? (
+                  leadTags.map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => setLeadTags((current) => current.filter((item) => item !== tag))}
+                      className="flex items-center gap-1 rounded-full bg-brand-500/10 px-3 py-1 text-[11px] font-semibold text-brand-600 transition hover:bg-brand-500/20 dark:text-brand-300"
+                    >
+                      {tagLabel(tag)}
+                      <X size={12} />
+                    </button>
+                  ))
+                ) : (
+                  <span className="text-xs text-slate-400">No tags yet</span>
+                )}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {suggestedTags.map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => setLeadTags((current) => mergeTags(current, [tag]))}
+                    className="rounded-full border border-white/30 bg-white/60 px-3 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-white/80 dark:border-white/10 dark:bg-white/5 dark:text-slate-300"
+                  >
+                    + {tagLabel(tag)}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -1013,7 +1496,7 @@ export default function LeadsPage() {
 
         <div className="mb-5 grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
           <div className="min-w-0 space-y-3">
-            <div className="glass-card flex flex-wrap items-center gap-3 p-3">
+            <div className="glass-card relative z-30 flex flex-wrap items-center gap-3 p-3">
               <div className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-xl border border-white/50 bg-white/50 px-3 dark:border-white/10 dark:bg-black/20 sm:h-10 sm:min-w-[220px]">
                 <Search size={15} className="text-slate-500 shrink-0" />
                 <input
@@ -1029,16 +1512,53 @@ export default function LeadsPage() {
                   value={statusFilter} 
                   onChange={setStatusFilter}
                   icon={Filter}
-                  placeholder="-- Stat By Status --"
+                  placeholder="-- Stage --"
                   className="w-48 h-10"
                   options={[
-                    { value: "all", label: "-- Stat By Status --" },
-                    ...statuses.map((s) => ({ value: s.key, label: s.label }))
+                    { value: "all", label: "-- Stage --" },
+                    ...(configs.stages.length
+                      ? configs.stages.map((s) => ({ value: s.id, label: s.name }))
+                      : statuses.map((s) => ({ value: s.key, label: s.label })))
+                  ]}
+                />
+                <ThemedSelect
+                  value={sourceFilter}
+                  onChange={setSourceFilter}
+                  icon={Globe}
+                  placeholder="-- Source --"
+                  className="w-44 h-10"
+                  options={[
+                    { value: "all", label: "-- Source --" },
+                    ...configs.sources.map((s) => ({ value: s.id, label: s.name })),
+                  ]}
+                />
+                <ThemedSelect
+                  value={priorityFilter}
+                  onChange={setPriorityFilter}
+                  icon={Zap}
+                  placeholder="-- Priority --"
+                  className="w-40 h-10"
+                  options={[
+                    { value: "all", label: "-- Priority --" },
+                    { value: "high", label: "High" },
+                    { value: "medium", label: "Medium" },
+                    { value: "low", label: "Low" },
+                  ]}
+                />
+                <ThemedSelect
+                  value={tagFilter}
+                  onChange={setTagFilter}
+                  icon={Filter}
+                  placeholder="-- Tag --"
+                  className="w-40 h-10"
+                  options={[
+                    { value: "all", label: "-- Tag --" },
+                    ...availableTags.map((tag) => ({ value: tag, label: tagLabel(tag) })),
                   ]}
                 />
                 <ThemedSelect 
-                  value={"desc"} 
-                  onChange={() => {}}
+                  value={sortOrder} 
+                  onChange={setSortOrder}
                   icon={ArrowRight}
                   placeholder="-- Sort By Date --"
                   className="w-48 h-10"
@@ -1047,9 +1567,9 @@ export default function LeadsPage() {
                     { value: "asc", label: "Oldest First" }
                   ]}
                 />
-                <input type="date" className="h-10 rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-700 outline-none dark:border-white/10 dark:bg-black/20 dark:text-slate-200" />
-                <input type="date" className="h-10 rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-700 outline-none dark:border-white/10 dark:bg-black/20 dark:text-slate-200" />
-                <button className="h-10 rounded-xl bg-brand-600 px-5 text-sm font-semibold text-white shadow-glow transition hover:bg-brand-500">
+                <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} className="h-10 rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-700 outline-none dark:border-white/10 dark:bg-black/20 dark:text-slate-200" />
+                <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} className="h-10 rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-700 outline-none dark:border-white/10 dark:bg-black/20 dark:text-slate-200" />
+                <button type="button" onClick={() => void loadLeads()} className="h-10 rounded-xl bg-brand-600 px-5 text-sm font-semibold text-white shadow-glow transition hover:bg-brand-500">
                   Filter
                 </button>
               </div>
@@ -1062,7 +1582,7 @@ export default function LeadsPage() {
                     key={column.key} 
                     className="glass-card min-h-64 p-3"
                     onDragOver={handleDragOver}
-                    onDrop={(e) => handleDrop(e, column.key)}
+                    onDrop={(e) => handleDrop(e, column.key, column.id)}
                   >
                     <div className="mb-3 flex items-center justify-between">
                       <span className={`rounded-lg px-2.5 py-1 text-xs font-bold ${column.tone}`}>{column.label}</span>
@@ -1083,6 +1603,15 @@ export default function LeadsPage() {
                         >
                           <span className="block truncate text-sm font-semibold text-slate-900 dark:text-white">{lead.company_name}</span>
                           <span className="mt-1 block truncate text-xs text-slate-500 dark:text-slate-400">{lead.contact_person ?? "No contact"}</span>
+                          {lead.tags?.length ? (
+                            <span className="mt-2 flex flex-wrap gap-1 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                              {lead.tags.slice(0, 3).map((tag) => (
+                                <span key={tag} className="rounded-full bg-brand-500/10 px-2 py-0.5 text-[10px] font-semibold text-brand-600 dark:text-brand-300">
+                                  {tagLabel(tag)}
+                                </span>
+                              ))}
+                            </span>
+                          ) : null}
                           <span className="mt-2 flex flex-wrap gap-1.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
                             <span className="rounded-full bg-white/60 px-2 py-0.5 dark:bg-white/10">{compactSignal(lead.intent, "Intent: unknown")}</span>
                             <span className="rounded-full bg-white/60 px-2 py-0.5 dark:bg-white/10">{compactSignal(lead.engagement, "Engagement: unknown")}</span>
@@ -1127,6 +1656,15 @@ export default function LeadsPage() {
                         <div className="min-w-0">
                           <p className="truncate text-base font-semibold text-slate-900 dark:text-white">{lead.company_name}</p>
                           <p className="mt-1 truncate text-sm text-slate-500 dark:text-slate-400">{lead.contact_person ?? "No contact"}</p>
+                          {lead.tags?.length ? (
+                            <p className="mt-2 flex flex-wrap gap-1 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                              {lead.tags.slice(0, 3).map((tag) => (
+                                <span key={tag} className="rounded-full bg-brand-500/10 px-2 py-0.5 text-[10px] font-semibold text-brand-600 dark:text-brand-300">
+                                  {tagLabel(tag)}
+                                </span>
+                              ))}
+                            </p>
+                          ) : null}
                           <p className="mt-2 flex flex-wrap gap-1.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
                             <span className="rounded-full bg-white/60 px-2 py-0.5 dark:bg-white/10">{compactSignal(lead.intent, "Intent: unknown")}</span>
                             <span className="rounded-full bg-white/60 px-2 py-0.5 dark:bg-white/10">{compactSignal(lead.engagement, "Engagement: unknown")}</span>
@@ -1179,14 +1717,28 @@ export default function LeadsPage() {
                         className="transition hover:bg-white/40 dark:hover:bg-white/10"
                       >
                         <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">{formatDate(lead.created_at)}</td>
-                        <td className="px-5 py-4 text-sm font-semibold text-slate-800 dark:text-slate-100">{lead.company_name}</td>
+                        <td className="px-5 py-4 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                          <div className="flex items-center gap-2">
+                            {lead.untouched ? <span className="rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-bold text-rose-600 dark:text-rose-300">NEW</span> : null}
+                            {lead.company_name}
+                          </div>
+                          {lead.tags?.length ? (
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {lead.tags.slice(0, 3).map((tag) => (
+                                <span key={tag} className="rounded-full bg-brand-500/10 px-2 py-0.5 text-[10px] font-semibold text-brand-600 dark:text-brand-300">
+                                  {tagLabel(tag)}
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
+                        </td>
                         <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">{lead.phone || "-"}</td>
                         <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300 capitalize">
                            {(lead.industry_data as any)?.profession || lead.industry || "—"}
                         </td>
                         <td className="px-5 py-4">
-                          <span className={`rounded-lg px-2.5 py-1 text-[11px] font-bold ${statusTone(lead.status)}`}>
-                            {lead.status}
+                          <span className={`rounded-lg px-2.5 py-1 text-[11px] font-bold ${stageTone(configs.stages.find((item) => item.id === lead.lead_stage_id)?.name, lead.status)}`}>
+                            {configs.stages.find((item) => item.id === lead.lead_stage_id)?.name ?? lead.status}
                           </span>
                         </td>
                         <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">{lead.assigned_user_id || "-"}</td>
@@ -1202,7 +1754,7 @@ export default function LeadsPage() {
                             <button onClick={() => { setLeadSidebarTab("edit"); openLead(lead.id); }} className="rounded p-1.5 hover:bg-white/60 hover:text-brand-500 dark:hover:bg-white/10">
                               <Edit2 size={16} />
                             </button>
-                            <button className="rounded p-1.5 hover:bg-rose-500/10 hover:text-rose-500">
+                            <button onClick={() => void deleteLead(lead.id)} className="rounded p-1.5 hover:bg-rose-500/10 hover:text-rose-500">
                               <Trash2 size={16} />
                             </button>
                           </div>

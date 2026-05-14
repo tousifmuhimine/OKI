@@ -125,6 +125,15 @@ export type Lead = {
   budget_max?: number | null;
   last_summary?: string | null;
   assigned_agent_id?: string | null;
+  lead_source_id?: string | null;
+  lead_stage_id?: string | null;
+  lead_sector_id?: string | null;
+  lead_area_id?: string | null;
+  lead_profession_id?: string | null;
+  priority?: string;
+  untouched?: boolean;
+  ai_instructions?: string | null;
+  tags?: string[] | null;
 };
 
 export type LeadListResponse = {
@@ -134,6 +143,65 @@ export type LeadListResponse = {
     limit: number;
     offset: number;
   };
+};
+
+export type LeadSourceConfig = {
+  id: string;
+  name: string;
+  cost_per_lead: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type LeadStageConfig = {
+  id: string;
+  name: string;
+  probability_percent: number;
+  position: number;
+  is_closed: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type LeadNamedConfig = {
+  id: string;
+  name: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type LeadActivity = {
+  id: string;
+  lead_id: string;
+  activity_type: string;
+  direction: string | null;
+  platform: string | null;
+  title: string | null;
+  content: string | null;
+  duration_seconds: number | null;
+  due_at: string | null;
+  completed_at: string | null;
+  created_by_user_id: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type LeadTimelineItem = {
+  id: string;
+  item_type: string;
+  activity_type: string | null;
+  direction: string | null;
+  platform: string | null;
+  title: string | null;
+  content: string | null;
+  created_by_user_id: string | null;
+  due_at: string | null;
+  completed_at: string | null;
+  created_at: string;
 };
 
 export type Order = {
@@ -200,6 +268,8 @@ export type InboxConversation = {
   channel_type: ChannelType;
   last_message_at: string | null;
   created_at: string;
+  is_bot_paused: boolean;
+  assigned_user_id: string | null;
   contact: InboxContact | null;
   inbox: InboxIntegration | null;
   last_message_preview: string | null;

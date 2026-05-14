@@ -38,7 +38,7 @@ class Customer(Base, TimestampMixin):
     assigned_user_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
     stage: Mapped[str] = mapped_column(String(64), default="new", index=True)
     group_name: Mapped[str] = mapped_column(String(120), nullable=True)
-    tags: Mapped[dict] = mapped_column(JSONB, default=dict)
+    tags: Mapped[list[str]] = mapped_column(JSONB, default=list)
     score: Mapped[int] = mapped_column(default=0)
     last_contact_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     notes: Mapped[str] = mapped_column(Text, nullable=True)
@@ -99,6 +99,76 @@ class Lead(Base, TimestampMixin):
     budget_max: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=True)
     last_summary: Mapped[str] = mapped_column(Text, nullable=True)
     assigned_agent_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
+    lead_source_id: Mapped[str] = mapped_column(String(36), ForeignKey("lead_sources.id"), nullable=True, index=True)
+    lead_stage_id: Mapped[str] = mapped_column(String(36), ForeignKey("lead_stages.id"), nullable=True, index=True)
+    lead_sector_id: Mapped[str] = mapped_column(String(36), ForeignKey("lead_sectors.id"), nullable=True, index=True)
+    lead_area_id: Mapped[str] = mapped_column(String(36), ForeignKey("lead_areas.id"), nullable=True, index=True)
+    lead_profession_id: Mapped[str] = mapped_column(String(36), ForeignKey("lead_professions.id"), nullable=True, index=True)
+    priority: Mapped[str] = mapped_column(String(32), default="medium", index=True)
+    untouched: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    ai_instructions: Mapped[str] = mapped_column(Text, nullable=True)
+    tags: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+
+class LeadSource(Base, TimestampMixin):
+    __tablename__ = "lead_sources"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True, index=True)
+    cost_per_lead: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+
+class LeadStage(Base, TimestampMixin):
+    __tablename__ = "lead_stages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True, index=True)
+    probability_percent: Mapped[int] = mapped_column(Integer, default=0)
+    position: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    is_closed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+
+class LeadSector(Base, TimestampMixin):
+    __tablename__ = "lead_sectors"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+
+class LeadArea(Base, TimestampMixin):
+    __tablename__ = "lead_areas"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+
+class LeadProfession(Base, TimestampMixin):
+    __tablename__ = "lead_professions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+
+class LeadActivity(Base, TimestampMixin):
+    __tablename__ = "lead_activities"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    lead_id: Mapped[str] = mapped_column(String(36), ForeignKey("leads.id", ondelete="CASCADE"), index=True)
+    activity_type: Mapped[str] = mapped_column(String(64), index=True)
+    direction: Mapped[str] = mapped_column(String(32), nullable=True, index=True)
+    platform: Mapped[str] = mapped_column(String(64), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=True)
+    content: Mapped[str] = mapped_column(Text, nullable=True)
+    duration_seconds: Mapped[int] = mapped_column(Integer, nullable=True)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_by_user_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
+    activity_metadata: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
 
 
 class Opportunity(Base, TimestampMixin):

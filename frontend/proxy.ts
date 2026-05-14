@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const AUTH_COOKIE_NAME = "oki_auth_session";
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const hasSessionCookie = Boolean(request.cookies.get(AUTH_COOKIE_NAME)?.value);
 
   if (!hasSessionCookie) {

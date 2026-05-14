@@ -339,7 +339,7 @@ export default function DashboardPage() {
       <section className="min-h-[calc(100vh-54px)] bg-transparent px-6 pb-10 pt-6">
 
         {/* ── Greeting & Multi-TZ Clocks ──────────────────────── */}
-        <div className="relative z-50 mb-5 flex flex-wrap items-end justify-between gap-4 animate-fade-up">
+        <div className="relative z-10 mb-5 flex flex-wrap items-end justify-between gap-4 animate-fade-up">
           <div>
             <h1 className="text-[22px] font-bold tracking-tight text-slate-900 dark:text-white">
               Good afternoon, {userName} 👋
