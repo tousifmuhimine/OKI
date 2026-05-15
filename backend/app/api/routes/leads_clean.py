@@ -1,23 +1,33 @@
+from datetime import datetime
+
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, get_current_auth, get_session_dep
-from app.db.models import UserLLMConfig, Contact, Conversation, Customer, Inbox, Lead, Opportunity, SalesOrder, Task, AuditLog
+from app.db.models import AuditLog, Contact, Conversation, Customer, Inbox, Lead, LeadActivity, LeadArea, LeadProfession, LeadSector, LeadSource, LeadStage, Message, Opportunity, SalesOrder, Task, UserLLMConfig
 from app.inbox.security import decrypt_channel_config
 from app.schemas.common import PaginationMeta
 from app.schemas.customer import CustomerOut
-from app.schemas.lead import LeadAnalyticsSummary, LeadCreate, LeadListResponse, LeadOut, LeadUpdate, LeadConvertPayload
+from app.schemas.lead import (
+    LeadActivityCreate,
+    LeadActivityOut,
+    LeadActivityUpdate,
+    LeadAnalyticsSummary,
+    LeadConvertPayload,
+    LeadCreate,
+    LeadListResponse,
+    LeadOut,
+    LeadUpdate,
+    LeadTimelineItem,
+)
 from app.services.ai_convert import convert_notes_to_lead
 from app.services.intelligence import evaluate_intelligence_alerts, record_preference_history, record_stage_history
 from app.services.lead_capture import upsert_lead_from_inbound_message
 
 
 router = APIRouter()
-
-LEAD_STATUSES = {"new", "contacted", "qualified", "proposal", "won", "lost"}
-
 
 async def _get_lead_or_404(lead_id: str, session: AsyncSession) -> Lead:
     lead = await session.get(Lead, lead_id)
@@ -26,22 +36,97 @@ async def _get_lead_or_404(lead_id: str, session: AsyncSession) -> Lead:
     return lead
 
 
+async def _validate_config_ids(changes: dict, session: AsyncSession) -> None:
+    checks = {
+        "lead_source_id": LeadSource,
+        "lead_stage_id": LeadStage,
+        "lead_sector_id": LeadSector,
+        "lead_area_id": LeadArea,
+        "lead_profession_id": LeadProfession,
+    }
+    for field_name, model in checks.items():
+        value = changes.get(field_name)
+        if value is None or value == "":
+            continue
+        entity = await session.get(model, value)
+        if not entity or not entity.is_active:
+            raise HTTPException(status_code=400, detail=f"Invalid {field_name}")
+
+
+def _normalize_tags(tags: list[str] | None) -> list[str] | None:
+    if tags is None:
+        return None
+    normalized = [tag.strip().lower() for tag in tags if isinstance(tag, str) and tag.strip()]
+    unique: list[str] = []
+    seen = set()
+    for tag in normalized:
+        if tag not in seen:
+            seen.add(tag)
+            unique.append(tag)
+    return unique
+
+
 @router.get("", response_model=LeadListResponse)
 async def list_leads(
     status_filter: str | None = Query(default=None, alias="status"),
+    stage_id: str | None = Query(default=None),
+    source_id: str | None = Query(default=None),
+    tag: str | None = Query(default=None),
+    priority: str | None = Query(default=None),
+    search: str | None = Query(default=None),
+    start_date: datetime | None = Query(default=None),
+    end_date: datetime | None = Query(default=None),
+    quick_filter: str | None = Query(default=None),
+    sort: str = Query(default="desc", pattern="^(asc|desc)$"),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-    _: AuthContext = Depends(get_current_auth),
+    auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> LeadListResponse:
+    filters = []
+
+    if status_filter and status_filter != "all":
+        filters.append(Lead.status == status_filter)
+    if stage_id:
+        filters.append(Lead.lead_stage_id == stage_id)
+    if source_id:
+        filters.append(Lead.lead_source_id == source_id)
+    if tag:
+        tag_value = tag.strip().lower()
+        if tag_value:
+            filters.append(Lead.tags.contains([tag_value]))
+    if priority and priority != "all":
+        filters.append(Lead.priority == priority.lower())
+    if search:
+        needle = f"%{search.strip()}%"
+        filters.append(
+            or_(
+                Lead.company_name.ilike(needle),
+                Lead.contact_person.ilike(needle),
+                Lead.phone.ilike(needle),
+                Lead.email.ilike(needle),
+            )
+        )
+    if start_date:
+        filters.append(Lead.created_at >= start_date)
+    if end_date:
+        filters.append(Lead.created_at <= end_date)
+    if quick_filter == "assigned_to_me":
+        filters.append(or_(Lead.assigned_user_id == auth.user_id, Lead.assigned_agent_id == auth.user_id))
+    elif quick_filter == "untouched":
+        filters.append(Lead.untouched.is_(True))
+    elif quick_filter == "followups_due":
+        filters.append(and_(Lead.follow_up_date.is_not(None), Lead.follow_up_date <= func.now()))
+
     query = select(Lead)
     count_query = select(func.count(Lead.id))
 
-    if status_filter:
-        query = query.where(Lead.status == status_filter)
-        count_query = count_query.where(Lead.status == status_filter)
+    if filters:
+        query = query.where(*filters)
+        count_query = count_query.where(*filters)
 
-    query = query.order_by(Lead.updated_at.desc()).limit(limit).offset(offset)
+    order_column = Lead.created_at.asc() if sort == "asc" else Lead.created_at.desc()
+    query = query.order_by(order_column).limit(limit).offset(offset)
     rows = (await session.execute(query)).scalars().all()
     total = (await session.execute(count_query)).scalar_one()
 
@@ -81,7 +166,13 @@ async def create_lead(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> LeadOut:
-    entity = Lead(**payload.model_dump())
+    data = payload.model_dump()
+    if data.get("priority"):
+        data["priority"] = data["priority"].lower()
+    if "tags" in data:
+        data["tags"] = _normalize_tags(data.get("tags"))
+    await _validate_config_ids(data, session)
+    entity = Lead(**data)
     if not entity.assigned_user_id:
         entity.assigned_user_id = auth.user_id
 
@@ -135,16 +226,6 @@ async def ai_convert_notes(
     return result
 
 
-@router.get("/{lead_id}", response_model=LeadOut)
-async def get_lead(
-    lead_id: str,
-    _: AuthContext = Depends(get_current_auth),
-    session: AsyncSession = Depends(get_session_dep),
-) -> LeadOut:
-    lead = await _get_lead_or_404(lead_id, session)
-    return LeadOut.model_validate(lead)
-
-
 @router.get("/from-conversation/{conversation_id}", response_model=LeadOut)
 async def get_lead_from_conversation(
     conversation_id: str,
@@ -192,6 +273,16 @@ async def create_lead_from_conversation(
     return LeadOut.model_validate(lead)
 
 
+@router.get("/{lead_id}", response_model=LeadOut)
+async def get_lead(
+    lead_id: str,
+    _: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> LeadOut:
+    lead = await _get_lead_or_404(lead_id, session)
+    return LeadOut.model_validate(lead)
+
+
 @router.patch("/{lead_id}", response_model=LeadOut)
 async def update_lead(
     lead_id: str,
@@ -201,12 +292,18 @@ async def update_lead(
 ) -> LeadOut:
     lead = await _get_lead_or_404(lead_id, session)
     changes = payload.model_dump(exclude_unset=True)
-    if changes.get("status") and changes["status"] not in LEAD_STATUSES:
-        raise HTTPException(status_code=400, detail="Unsupported lead status")
+    if changes.get("priority"):
+        changes["priority"] = changes["priority"].lower()
+    if "tags" in changes:
+        changes["tags"] = _normalize_tags(changes.get("tags"))
+    await _validate_config_ids(changes, session)
 
     previous_status = lead.status
     for key, value in changes.items():
         setattr(lead, key, value)
+
+    if changes and "untouched" not in changes:
+        lead.untouched = False
 
     if "status" in changes:
         await record_stage_history(
@@ -238,6 +335,148 @@ async def update_lead(
     await session.commit()
     await session.refresh(lead)
     return LeadOut.model_validate(lead)
+
+
+@router.delete("/{lead_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_lead(
+    lead_id: str,
+    _: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> None:
+    lead = await _get_lead_or_404(lead_id, session)
+    await session.delete(lead)
+    await session.commit()
+
+
+@router.get("/{lead_id}/activities", response_model=list[LeadActivityOut])
+async def list_lead_activities(
+    lead_id: str,
+    activity_type: str | None = Query(default=None),
+    _: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> list[LeadActivityOut]:
+    await _get_lead_or_404(lead_id, session)
+    query = select(LeadActivity).where(LeadActivity.lead_id == lead_id)
+    if activity_type:
+        query = query.where(LeadActivity.activity_type == activity_type)
+    query = query.order_by(LeadActivity.created_at.desc())
+    rows = (await session.execute(query)).scalars().all()
+    return [LeadActivityOut.model_validate(row) for row in rows]
+
+
+@router.get("/{lead_id}/timeline", response_model=list[LeadTimelineItem])
+async def get_lead_timeline(
+    lead_id: str,
+    _: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> list[LeadTimelineItem]:
+    lead = await _get_lead_or_404(lead_id, session)
+    items: list[LeadTimelineItem] = [
+        LeadTimelineItem(
+            id=activity.id,
+            item_type="activity",
+            activity_type=activity.activity_type,
+            direction=activity.direction,
+            platform=activity.platform,
+            title=activity.title,
+            content=activity.content,
+            created_by_user_id=activity.created_by_user_id,
+            due_at=activity.due_at,
+            completed_at=activity.completed_at,
+            created_at=activity.created_at,
+        )
+        for activity in (
+            await session.execute(select(LeadActivity).where(LeadActivity.lead_id == lead_id))
+        ).scalars().all()
+    ]
+
+    if lead.conversation_id:
+        messages = (
+            await session.execute(
+                select(Message)
+                .where(Message.conversation_id == lead.conversation_id)
+                .order_by(Message.created_at.desc())
+            )
+        ).scalars().all()
+        items.extend(
+            LeadTimelineItem(
+                id=message.id,
+                item_type="message",
+                activity_type="message",
+                direction=message.message_type,
+                platform=lead.capture_source or "conversation",
+                title="Conversation message",
+                content=message.content,
+                created_by_user_id=message.sender_id,
+                created_at=message.created_at,
+            )
+            for message in messages
+        )
+
+    return sorted(items, key=lambda item: item.created_at, reverse=True)
+
+
+@router.post("/{lead_id}/activities", response_model=LeadActivityOut, status_code=status.HTTP_201_CREATED)
+async def create_lead_activity(
+    lead_id: str,
+    payload: LeadActivityCreate,
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> LeadActivityOut:
+    lead = await _get_lead_or_404(lead_id, session)
+    data = payload.model_dump(by_alias=False)
+    metadata = data.pop("metadata", None)
+    activity = LeadActivity(
+        **data,
+        lead_id=lead_id,
+        created_by_user_id=auth.user_id,
+        activity_metadata=metadata or {},
+    )
+    lead.untouched = False
+    if payload.activity_type == "follow_up" and payload.due_at:
+        lead.follow_up_date = payload.due_at
+    session.add(activity)
+    await session.commit()
+    await session.refresh(activity)
+    return LeadActivityOut.model_validate(activity)
+
+
+@router.patch("/{lead_id}/activities/{activity_id}", response_model=LeadActivityOut)
+async def update_lead_activity(
+    lead_id: str,
+    activity_id: str,
+    payload: LeadActivityUpdate,
+    _: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> LeadActivityOut:
+    await _get_lead_or_404(lead_id, session)
+    activity = await session.get(LeadActivity, activity_id)
+    if not activity or activity.lead_id != lead_id:
+        raise HTTPException(status_code=404, detail="Lead activity not found")
+    changes = payload.model_dump(exclude_unset=True, by_alias=False)
+    metadata = changes.pop("metadata", None)
+    for key, value in changes.items():
+        setattr(activity, key, value)
+    if metadata is not None:
+        activity.activity_metadata = metadata
+    await session.commit()
+    await session.refresh(activity)
+    return LeadActivityOut.model_validate(activity)
+
+
+@router.delete("/{lead_id}/activities/{activity_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_lead_activity(
+    lead_id: str,
+    activity_id: str,
+    _: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> None:
+    await _get_lead_or_404(lead_id, session)
+    activity = await session.get(LeadActivity, activity_id)
+    if not activity or activity.lead_id != lead_id:
+        raise HTTPException(status_code=404, detail="Lead activity not found")
+    await session.delete(activity)
+    await session.commit()
 
 
 @router.post("/{lead_id}/convert", status_code=status.HTTP_201_CREATED)
@@ -312,6 +551,7 @@ async def convert_lead(
     old_status = lead.status
     lead.converted_customer_id = customer.id
     lead.status = "won"
+    lead.untouched = False
     await record_stage_history(
         session,
         workspace_id=auth.user_id,

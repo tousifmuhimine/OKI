@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   LayoutDashboard, Users, Zap, ShoppingCart,
   Star, Mail, MessageSquare, Lightbulb, TrendingUp,
@@ -73,6 +73,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const isLogin  = pathname === "/login" || pathname?.startsWith("/auth");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [quickNewOpen, setQuickNewOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement | null>(null);
+  const accountButtonRef = useRef<HTMLButtonElement | null>(null);
 
   // QuickNew form state
   const [qnCompany, setQnCompany] = useState("");
@@ -94,6 +97,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       document.body.style.overflow = previousOverflow;
     };
   }, [mobileMenuOpen]);
+
+  useEffect(() => {
+    if (!accountMenuOpen) return;
+    function handleClick(event: MouseEvent) {
+      if (
+        accountMenuRef.current &&
+        !accountMenuRef.current.contains(event.target as Node) &&
+        accountButtonRef.current &&
+        !accountButtonRef.current.contains(event.target as Node)
+      ) {
+        setAccountMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [accountMenuOpen]);
 
   async function signOut() {
     clearAllAuthState();
@@ -212,7 +231,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* ─── Header ──────────────────────────────────────────── */}
-      <header className="fixed inset-x-0 top-0 z-20 flex h-[54px] items-center justify-between border-b border-white/30 dark:border-white/10 bg-white/55 dark:bg-slate-900/55 px-3 backdrop-blur-xl sm:px-5 lg:left-[72px]">
+      <header className="fixed inset-x-0 top-0 z-50 flex h-[54px] items-center justify-between border-b border-white/30 dark:border-white/10 bg-white/55 dark:bg-slate-900/55 px-3 backdrop-blur-xl sm:px-5 lg:left-[72px]">
 
         {/* Search */}
         <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -270,12 +289,51 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <LogOut size={14} />
           </button>
 
-          <div className="ml-1 hidden items-center gap-1.5 rounded-xl px-2 py-1 transition hover:bg-white/50 dark:hover:bg-white/10 cursor-pointer sm:flex">
-            <div className="grid h-7 w-7 place-items-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 text-[11px] font-bold text-white shadow-glow-sm">
-              AD
-            </div>
-            <span className="hidden text-xs font-medium text-slate-800 dark:text-slate-200 xl:block">Admin</span>
-            <ChevronDown size={11} className="hidden text-slate-500 dark:text-slate-400 xl:block" />
+          <div className="relative ml-1 hidden sm:flex">
+            <button
+              ref={accountButtonRef}
+              type="button"
+              onClick={() => setAccountMenuOpen((prev) => !prev)}
+              className="flex items-center gap-1.5 rounded-xl px-2 py-1 transition hover:bg-white/50 dark:hover:bg-white/10"
+              aria-expanded={accountMenuOpen}
+              aria-haspopup="menu"
+            >
+              <div className="grid h-7 w-7 place-items-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 text-[11px] font-bold text-white shadow-glow-sm">
+                AD
+              </div>
+              <span className="hidden text-xs font-medium text-slate-800 dark:text-slate-200 xl:block">Admin</span>
+              <ChevronDown size={11} className={`hidden text-slate-500 transition-transform dark:text-slate-400 xl:block ${accountMenuOpen ? "rotate-180" : ""}`} />
+            </button>
+
+            {accountMenuOpen && (
+              <div
+                ref={accountMenuRef}
+                role="menu"
+                className="absolute right-0 top-full z-[120] mt-2 w-52 rounded-2xl border border-white/40 bg-white dark:border-white/20 dark:bg-slate-900 p-1 shadow-2xl backdrop-blur-2xl"
+              >
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setAccountMenuOpen(false);
+                    await signOut();
+                  }}
+                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-700 transition hover:bg-brand-500 hover:text-white dark:text-slate-200"
+                  role="menuitem"
+                >
+                  <ArrowRight size={14} />
+                  Switch account
+                </button>
+                <Link
+                  href="/dashboard/settings/permissions"
+                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-600 transition hover:bg-white/70 dark:text-slate-300 dark:hover:bg-white/10"
+                  role="menuitem"
+                  onClick={() => setAccountMenuOpen(false)}
+                >
+                  <Settings size={14} />
+                  Account settings
+                </Link>
+              </div>
+            )}
           </div>
         </div>
       </header>
@@ -284,7 +342,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <main className="min-h-screen pt-[54px] pb-[calc(72px+env(safe-area-inset-bottom))] lg:pl-[72px] lg:pb-0">{children}</main>
 
       {mobileMenuOpen ? (
-        <div className="fixed inset-0 z-40 lg:hidden">
+        <div className="fixed inset-0 z-[130] lg:hidden">
           <button
             type="button"
             aria-label="Close navigation"
@@ -407,7 +465,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <nav
         aria-label="Primary navigation"
-        className="fixed inset-x-0 bottom-0 z-30 border-t border-white/30 bg-white/80 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-12px_30px_rgba(15,23,42,0.12)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/80 lg:hidden"
+        className="fixed inset-x-0 bottom-0 z-50 border-t border-white/30 bg-white/80 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-12px_30px_rgba(15,23,42,0.12)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/80 lg:hidden"
       >
         <div className="mx-auto grid max-w-md grid-cols-5 gap-1">
           {mobileNav.map((item) => {
