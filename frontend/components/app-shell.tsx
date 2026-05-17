@@ -17,6 +17,12 @@ import { NotificationPanel } from "@/components/notification-panel";
 import { clearAllAuthState, isDemoSessionActive } from "@/lib/demo-auth";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 
+type CurrentUser = {
+  name: string;
+  role: string;
+  initials: string;
+};
+
 const primaryNav = [
   { href: "/dashboard", label: "Workbench",  icon: LayoutDashboard, badge: "3" },
   { href: "/customers", label: "Customers",  icon: Users },
@@ -85,6 +91,35 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [qnError, setQnError] = useState<string | null>(null);
   const [qnSuccess, setQnSuccess] = useState(false);
 
+  // Current User State
+  const [currentUser, setCurrentUser] = useState<CurrentUser>({
+    name: "Admin",
+    role: "admin",
+    initials: "AD",
+  });
+
+  useEffect(() => {
+    async function loadUser() {
+      if (isDemoSessionActive()) {
+        setCurrentUser({ name: "Demo User", role: "admin", initials: "DU" });
+        return;
+      }
+      if (isSupabaseConfigured()) {
+        const { data } = await getSupabaseClient().auth.getSession();
+        const meta = data.session?.user?.user_metadata;
+        if (meta) {
+          const name = meta.name || data.session?.user?.email?.split("@")[0] || "User";
+          const role = meta.role || "agent";
+          const initials = name.slice(0, 2).toUpperCase();
+          setCurrentUser({ name, role, initials });
+        } else {
+          setCurrentUser({ name: "User", role: "agent", initials: "US" });
+        }
+      }
+    }
+    loadUser();
+  }, [pathname]);
+
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [pathname]);
@@ -150,6 +185,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {/* Primary nav */}
         <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2 py-3">
           {primaryNav.map((item) => {
+            if (currentUser.role !== "admin" && (item.href.includes("settings") || item.href.includes("ai-monitor"))) return null;
             const active = isRouteActive(pathname, item.href);
             const Icon   = item.icon;
             return (
@@ -180,6 +216,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="my-2 h-px bg-slate-200/50 dark:bg-white/10" />
 
           {secondaryNav.slice(1).map((item) => {
+            if (currentUser.role !== "admin" && (item.href === "/dashboard/team" || item.href === "/dashboard/synergy")) return null;
             const Icon = item.icon;
             const active = item.href ? isRouteActive(pathname, item.href) : false;
             const className = `relative flex flex-col items-center justify-center gap-1 rounded-xl py-3 text-[10px] transition ${
@@ -219,14 +256,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <HelpCircle size={16} strokeWidth={1.6} />
             <span>Help</span>
           </div>
-          <Link href="/dashboard/settings/channels" className={`flex flex-col items-center gap-1 rounded-xl py-2.5 text-[10px] transition ${
-            pathname?.startsWith("/dashboard/settings")
-              ? "bg-slate-900/8 text-slate-900 dark:bg-white/12 dark:text-white"
-              : "text-slate-500 dark:text-slate-400 hover:bg-white/40 dark:hover:bg-white/10 hover:text-slate-800 dark:hover:text-slate-300"
-          }`}>
-            <Settings size={16} strokeWidth={1.6} />
-            <span>Settings</span>
-          </Link>
+          {currentUser.role === "admin" && (
+            <Link href="/dashboard/settings/channels" className={`flex flex-col items-center gap-1 rounded-xl py-2.5 text-[10px] transition ${
+              pathname?.startsWith("/dashboard/settings")
+                ? "bg-slate-900/8 text-slate-900 dark:bg-white/12 dark:text-white"
+                : "text-slate-500 dark:text-slate-400 hover:bg-white/40 dark:hover:bg-white/10 hover:text-slate-800 dark:hover:text-slate-300"
+            }`}>
+              <Settings size={16} strokeWidth={1.6} />
+              <span>Settings</span>
+            </Link>
+          )}
         </div>
       </aside>
 
@@ -298,10 +337,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               aria-expanded={accountMenuOpen}
               aria-haspopup="menu"
             >
-              <div className="grid h-7 w-7 place-items-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 text-[11px] font-bold text-white shadow-glow-sm">
-                AD
+              <div className="grid h-7 w-7 place-items-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 text-[11px] font-bold text-white shadow-glow-sm uppercase">
+                {currentUser.initials}
               </div>
-              <span className="hidden text-xs font-medium text-slate-800 dark:text-slate-200 xl:block">Admin</span>
+              <div className="hidden xl:flex flex-col items-start justify-center text-left">
+                <span className="text-xs font-medium text-slate-800 dark:text-slate-200 capitalize leading-none">{currentUser.name}</span>
+                {currentUser.role === "admin" && (
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-brand-500 dark:text-brand-400 mt-0.5">Admin Access</span>
+                )}
+              </div>
               <ChevronDown size={11} className={`hidden text-slate-500 transition-transform dark:text-slate-400 xl:block ${accountMenuOpen ? "rotate-180" : ""}`} />
             </button>
 
@@ -323,15 +367,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   <ArrowRight size={14} />
                   Switch account
                 </button>
-                <Link
-                  href="/dashboard/settings/permissions"
-                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-600 transition hover:bg-white/70 dark:text-slate-300 dark:hover:bg-white/10"
-                  role="menuitem"
-                  onClick={() => setAccountMenuOpen(false)}
-                >
-                  <Settings size={14} />
-                  Account settings
-                </Link>
+                {currentUser.role === "admin" && (
+                  <Link
+                    href="/dashboard/settings/permissions"
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-600 transition hover:bg-white/70 dark:text-slate-300 dark:hover:bg-white/10"
+                    role="menuitem"
+                    onClick={() => setAccountMenuOpen(false)}
+                  >
+                    <Settings size={14} />
+                    Account settings
+                  </Link>
+                )}
               </div>
             )}
           </div>

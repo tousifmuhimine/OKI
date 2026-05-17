@@ -64,7 +64,7 @@ async def create_task(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> TaskOut:
-    if not await has_permission(session, auth.user_id, auth.user_id, "tasks.manage"):
+    if not await has_permission(session, auth.user_id, auth, "tasks.manage"):
         raise HTTPException(status_code=403, detail="Permission denied")
     task = Task(**payload.model_dump())
     if not task.assigned_user_id:
@@ -79,10 +79,10 @@ async def create_task(
 async def update_task(
     task_id: str,
     payload: TaskUpdate,
-    _: AuthContext = Depends(get_current_auth),
+    auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> TaskOut:
-    if not await has_permission(session, auth.user_id, auth.user_id, "tasks.manage"):
+    if not await has_permission(session, auth.user_id, auth, "tasks.manage"):
         raise HTTPException(status_code=403, detail="Permission denied")
     task = await session.get(Task, task_id)
     if not task:
@@ -97,10 +97,10 @@ async def update_task(
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_task(
     task_id: str,
-    _: AuthContext = Depends(get_current_auth),
+    auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> None:
-    if not await has_permission(session, auth.user_id, auth.user_id, "tasks.manage"):
+    if not await has_permission(session, auth.user_id, auth, "tasks.manage"):
         raise HTTPException(status_code=403, detail="Permission denied")
     task = await session.get(Task, task_id)
     if not task:

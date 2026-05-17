@@ -192,7 +192,11 @@ export default function DashboardPage() {
   useEffect(() => {
     getSupabaseClient().auth.getUser().then(({ data }) => {
       if (data.user) {
-        const name = data.user.user_metadata?.name || data.user.email?.split('@')[0] || "Ji-ho";
+        let name = data.user.user_metadata?.name || data.user.email?.split('@')[0] || "Ji-ho";
+        const role = data.user.user_metadata?.role || "agent";
+        if (role === "admin") {
+          name += " sir";
+        }
         setUserName(name);
       }
     });

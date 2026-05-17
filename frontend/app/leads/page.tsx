@@ -35,6 +35,7 @@ import {
 
 import { ProtectedPage } from "@/components/protected-page";
 import { apiRequest } from "@/lib/api";
+import { getSupabaseClient } from "@/lib/supabase";
 import {
   Customer,
   Lead,
@@ -140,8 +141,10 @@ function apiDate(value: string, endOfDay = false) {
 
 export default function LeadsPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [users, setUsers] = useState<{ id: string; name: string | null; email: string | null }[]>([]);
   const [analytics, setAnalytics] = useState<LeadAnalyticsSummary | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<{ role: string; id: string } | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -206,7 +209,8 @@ export default function LeadsPage() {
     options,
     placeholder,
     icon: Icon,
-    className = ""
+    className = "",
+    name
   }: {
     value: string;
     onChange: (v: string) => void;
@@ -214,12 +218,14 @@ export default function LeadsPage() {
     placeholder: string;
     icon: any;
     className?: string;
+    name?: string;
   }) => {
     const [isOpen, setIsOpen] = useState(false);
     const selectedLabel = options.find(o => o.value === value)?.label || placeholder;
 
     return (
       <div className={`relative ${className}`}>
+        {name && <input type="hidden" name={name} value={value} />}
         <button
           type="button"
           onClick={() => setIsOpen(!isOpen)}
@@ -257,6 +263,11 @@ export default function LeadsPage() {
       </div>
     );
   };
+
+  const UncontrolledThemedSelect = ({ defaultValue = "", name, options, placeholder, icon, className = "" }: any) => {
+    const [val, setVal] = useState(defaultValue);
+    return <ThemedSelect value={val} onChange={setVal} name={name} options={options} placeholder={placeholder} icon={icon} className={className} />;
+  };
   // --- END CUSTOM THEMED SELECT ---
 
   const selectedLead = leads.find((lead) => lead.id === selectedId) ?? leads[0] ?? null;
@@ -281,7 +292,10 @@ export default function LeadsPage() {
       if (sourceFilter !== "all") params.set("source_id", sourceFilter);
       if (priorityFilter !== "all") params.set("priority", priorityFilter);
       if (tagFilter !== "all") params.set("tag", tagFilter);
-      if (quickFilter !== "all") {
+      // Agents always see only their assigned leads
+      if (currentUser?.role === "agent") {
+        params.set("quick_filter", "assigned_to_me");
+      } else if (quickFilter !== "all") {
         params.set("quick_filter", quickFilter === "assigned" ? "assigned_to_me" : quickFilter === "followup" ? "followups_due" : quickFilter);
       }
       if (startDate) params.set("start_date", apiDate(startDate));
@@ -306,14 +320,16 @@ export default function LeadsPage() {
 
   async function loadConfigs() {
     try {
-      const [sources, stages, sectors, areas, professions] = await Promise.all([
+      const [sources, stages, sectors, areas, professions, usersRes] = await Promise.all([
         apiRequest<LeadSourceConfig[]>("/config/lead-sources?active_only=true"),
         apiRequest<LeadStageConfig[]>("/config/lead-stages?active_only=true"),
         apiRequest<LeadNamedConfig[]>("/config/lead-sectors?active_only=true"),
         apiRequest<LeadNamedConfig[]>("/config/lead-areas?active_only=true"),
         apiRequest<LeadNamedConfig[]>("/config/lead-professions?active_only=true"),
+        apiRequest<{ data: { id: string; name: string | null; email: string | null; role: string | null }[] }>("/admin/users").catch(() => ({ data: [] })),
       ]);
       setConfigs({ sources, stages, sectors, areas, professions });
+      setUsers(usersRes.data);
       setLeadStageId((current) => current || stages[0]?.id || "");
     } catch (err) {
       setError((err as Error).message);
@@ -332,8 +348,18 @@ export default function LeadsPage() {
     }
   }
 
+  // Load current user role from Supabase
+  useEffect(() => {
+    getSupabaseClient().auth.getUser().then(({ data }) => {
+      if (data.user) {
+        const role = data.user.user_metadata?.role || "agent";
+        setCurrentUser({ role, id: data.user.id });
+      }
+    });
+  }, []);
+
   useEffect(() => { void loadConfigs(); }, []);
-  useEffect(() => { void loadLeads(); }, [quickFilter]);
+  useEffect(() => { void loadLeads(); }, [quickFilter, currentUser]);
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadLeads();
@@ -659,7 +685,7 @@ export default function LeadsPage() {
 
         {/* Dynamic Sidebar Navigation Tabs */}
         <div className="mt-4 flex w-full border-b border-white/20 dark:border-white/10">
-          {(["details", "activity", "edit"] as const).map((tab) => (
+          {(["details", "activity", ...(currentUser?.role === "admin" ? ["edit"] : [])] as ("details" | "activity" | "edit")[]).map((tab) => (
             <button
               key={tab}
               onClick={() => setLeadSidebarTab(tab)}
@@ -923,6 +949,7 @@ export default function LeadsPage() {
                   lead_stage_id: stageId || null,
                   lead_area_id: String(form.get("lead_area_id") || "") || null,
                   lead_profession_id: String(form.get("lead_profession_id") || "") || null,
+                  assigned_user_id: String(form.get("assigned_user_id") || "") || null,
                   tags: editTags,
                   ai_instructions: aiInstructions || null,
                   status: configs.stages.find((stage) => stage.id === stageId)?.name.toLowerCase().replace(/\s+/g, "_") || selectedLead.status,
@@ -948,36 +975,61 @@ export default function LeadsPage() {
               <div className="grid grid-cols-2 gap-2">
                 <label className="block">
                   <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Priority</span>
-                  <select name="priority" defaultValue={selectedLead.priority ?? "medium"} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white">
-                    <option value="high">High</option>
-                    <option value="medium">Medium</option>
-                    <option value="low">Low</option>
-                  </select>
+                  <UncontrolledThemedSelect
+                    name="priority"
+                    defaultValue={selectedLead.priority ?? "medium"}
+                    placeholder="Priority"
+                    icon={Zap}
+                    options={[
+                      { value: "high", label: "High" },
+                      { value: "medium", label: "Medium" },
+                      { value: "low", label: "Low" },
+                    ]}
+                  />
                 </label>
                 <label className="block">
                   <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Stage</span>
-                  <select name="lead_stage_id" defaultValue={selectedLead.lead_stage_id ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white">
-                    <option value="">No Stage</option>
-                    {configs.stages.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}
-                  </select>
+                  <UncontrolledThemedSelect
+                    name="lead_stage_id"
+                    defaultValue={selectedLead.lead_stage_id ?? ""}
+                    placeholder="Stage"
+                    icon={Filter}
+                    options={[{ value: "", label: "No Stage" }, ...configs.stages.map((stage) => ({ value: stage.id, label: stage.name }))]}
+                  />
                 </label>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <label className="block">
                   <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Area</span>
-                  <select name="lead_area_id" defaultValue={selectedLead.lead_area_id ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white">
-                    <option value="">No Area</option>
-                    {configs.areas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
-                  </select>
+                  <UncontrolledThemedSelect
+                    name="lead_area_id"
+                    defaultValue={selectedLead.lead_area_id ?? ""}
+                    placeholder="Area"
+                    icon={Globe}
+                    options={[{ value: "", label: "No Area" }, ...configs.areas.map((area) => ({ value: area.id, label: area.name }))]}
+                  />
                 </label>
                 <label className="block">
                   <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Profession</span>
-                  <select name="lead_profession_id" defaultValue={selectedLead.lead_profession_id ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white">
-                    <option value="">No Profession</option>
-                    {configs.professions.map((profession) => <option key={profession.id} value={profession.id}>{profession.name}</option>)}
-                  </select>
+                  <UncontrolledThemedSelect
+                    name="lead_profession_id"
+                    defaultValue={selectedLead.lead_profession_id ?? ""}
+                    placeholder="Profession"
+                    icon={User}
+                    options={[{ value: "", label: "No Profession" }, ...configs.professions.map((profession) => ({ value: profession.id, label: profession.name }))]}
+                  />
                 </label>
               </div>
+              <label className="block">
+                <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Assigned To</span>
+                <UncontrolledThemedSelect
+                  name="assigned_user_id"
+                  defaultValue={selectedLead.assigned_user_id ?? ""}
+                  placeholder="Unassigned"
+                  icon={User}
+                  options={[{ value: "", label: "Unassigned" }, ...users.map((u) => ({ value: u.id, label: u.name || u.email || u.id }))]}
+                />
+              </label>
               <div className="rounded-2xl border border-white/20 bg-white/30 p-4 dark:border-white/10 dark:bg-white/5">
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-[11px] font-bold uppercase text-slate-500">Tags</span>
@@ -1097,43 +1149,69 @@ export default function LeadsPage() {
           </p>
         ) : null}
 
-        <div className="mb-5 grid grid-cols-1 gap-3 min-[430px]:grid-cols-2 xl:grid-cols-4">
-          <div className="glass-card p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Total leads</span>
-              <Zap size={17} className="text-brand-500" />
+        {/* Stats — admins see global analytics, agents see only their assigned count */}
+        {currentUser?.role === "admin" ? (
+          <div className="mb-5 grid grid-cols-1 gap-3 min-[430px]:grid-cols-2 xl:grid-cols-4">
+            <div className="glass-card p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Total leads</span>
+                <Zap size={17} className="text-brand-500" />
+              </div>
+              <p className="mt-3 text-2xl font-bold text-slate-900 dark:text-white sm:text-3xl">
+                {analytics
+                  ? analytics.total - (analytics.by_status?.lost || 0) - (analytics.by_status?.won || 0)
+                  : leads.filter((l) => l.status !== "lost" && l.status !== "won").length}
+              </p>
             </div>
-            <p className="mt-3 text-2xl font-bold text-slate-900 dark:text-white sm:text-3xl">
-              {analytics
-                ? analytics.total - (analytics.by_status?.lost || 0) - (analytics.by_status?.won || 0)
-                : leads.filter((l) => l.status !== "lost" && l.status !== "won").length}
-            </p>
-          </div>
-          <div className="glass-card p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Converted</span>
-              <CheckCircle2 size={17} className="text-emerald-500" />
+            <div className="glass-card p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Converted</span>
+                <CheckCircle2 size={17} className="text-emerald-500" />
+              </div>
+              <p className="mt-3 text-2xl font-bold text-slate-900 dark:text-white sm:text-3xl">{analytics?.converted ?? 0}</p>
             </div>
-            <p className="mt-3 text-2xl font-bold text-slate-900 dark:text-white sm:text-3xl">{analytics?.converted ?? 0}</p>
-          </div>
-          <div className="glass-card p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Conversion rate</span>
-              <CircleDollarSign size={17} className="text-amber-500" />
+            <div className="glass-card p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Conversion rate</span>
+                <CircleDollarSign size={17} className="text-amber-500" />
+              </div>
+              <p className="mt-3 text-2xl font-bold text-slate-900 dark:text-white sm:text-3xl">{analytics?.conversion_rate ?? 0}%</p>
             </div>
-            <p className="mt-3 text-2xl font-bold text-slate-900 dark:text-white sm:text-3xl">{analytics?.conversion_rate ?? 0}%</p>
-          </div>
-          <div className="glass-card p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Top source</span>
-              <BarChart3 size={17} className="text-cyan-500" />
+            <div className="glass-card p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Top source</span>
+                <BarChart3 size={17} className="text-cyan-500" />
+              </div>
+              <p className="mt-3 truncate text-2xl font-bold text-slate-900 dark:text-white sm:text-3xl">{topSources[0]?.[0] ?? "None"}</p>
             </div>
-            <p className="mt-3 truncate text-2xl font-bold text-slate-900 dark:text-white sm:text-3xl">{topSources[0]?.[0] ?? "None"}</p>
           </div>
-        </div>
+        ) : (
+          <div className="mb-5 grid grid-cols-1 gap-3 min-[430px]:grid-cols-2">
+            <div className="glass-card p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-slate-500 dark:text-slate-400">My Assigned Leads</span>
+                <Zap size={17} className="text-brand-500" />
+              </div>
+              <p className="mt-3 text-2xl font-bold text-slate-900 dark:text-white sm:text-3xl">
+                {leads.filter((l) => l.status !== "lost" && l.status !== "won").length}
+              </p>
+            </div>
+            <div className="glass-card p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-slate-500 dark:text-slate-400">My Converted</span>
+                <CheckCircle2 size={17} className="text-emerald-500" />
+              </div>
+              <p className="mt-3 text-2xl font-bold text-slate-900 dark:text-white sm:text-3xl">
+                {leads.filter((l) => l.converted_customer_id).length}
+              </p>
+            </div>
+          </div>
+        )}
 
-        <div className="mb-5 glass-card p-4">
-          <label className="mb-3 block">
+        {/* Magic Convert + Create Lead — admin only */}
+        {currentUser?.role === "admin" && (<>
+          <div className="mb-5 glass-card p-4">
+            <label className="mb-3 block">
             <div className="mb-2 flex items-center gap-2">
               <Sparkles size={15} className="text-brand-500" />
               <span className="text-sm font-semibold text-slate-900 dark:text-white">Magic Convert (AI)</span>
@@ -1493,6 +1571,7 @@ export default function LeadsPage() {
             </div>
           </div>
         </form>
+        </>)}
 
         <div className="mb-5 grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
           <div className="min-w-0 space-y-3">
@@ -1714,7 +1793,8 @@ export default function LeadsPage() {
                     {filteredLeads.map((lead) => (
                       <tr
                         key={lead.id}
-                        className="transition hover:bg-white/40 dark:hover:bg-white/10"
+                        onClick={() => { setLeadSidebarTab("details"); openLead(lead.id); }}
+                        className={`cursor-pointer transition hover:bg-white/40 dark:hover:bg-white/10 ${selectedId === lead.id ? "bg-brand-500/8 dark:bg-brand-500/10 ring-1 ring-inset ring-brand-500/20" : ""}`}
                       >
                         <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">{formatDate(lead.created_at)}</td>
                         <td className="px-5 py-4 text-sm font-semibold text-slate-800 dark:text-slate-100">
@@ -1741,9 +1821,9 @@ export default function LeadsPage() {
                             {configs.stages.find((item) => item.id === lead.lead_stage_id)?.name ?? lead.status}
                           </span>
                         </td>
-                        <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">{lead.assigned_user_id || "-"}</td>
+                        <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">{users.find(u => u.id === lead.assigned_user_id)?.name || lead.assigned_user_id || "-"}</td>
                         <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">Admin</td>
-                        <td className="px-5 py-4 text-right">
+                        <td className="px-5 py-4 text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-end gap-1.5 text-slate-400">
                             <button onClick={() => { setLeadSidebarTab("activity"); openLead(lead.id); }} className="rounded p-1.5 hover:bg-white/60 hover:text-brand-500 dark:hover:bg-white/10">
                               <Activity size={16} />
@@ -1751,12 +1831,16 @@ export default function LeadsPage() {
                             <button onClick={() => { setLeadSidebarTab("details"); openLead(lead.id); }} className="rounded p-1.5 hover:bg-white/60 hover:text-brand-500 dark:hover:bg-white/10">
                               <Eye size={16} />
                             </button>
-                            <button onClick={() => { setLeadSidebarTab("edit"); openLead(lead.id); }} className="rounded p-1.5 hover:bg-white/60 hover:text-brand-500 dark:hover:bg-white/10">
-                              <Edit2 size={16} />
-                            </button>
-                            <button onClick={() => void deleteLead(lead.id)} className="rounded p-1.5 hover:bg-rose-500/10 hover:text-rose-500">
-                              <Trash2 size={16} />
-                            </button>
+                            {currentUser?.role === "admin" && (
+                              <button onClick={() => { setLeadSidebarTab("edit"); openLead(lead.id); }} className="rounded p-1.5 hover:bg-white/60 hover:text-brand-500 dark:hover:bg-white/10">
+                                <Edit2 size={16} />
+                              </button>
+                            )}
+                            {currentUser?.role === "admin" && (
+                              <button onClick={() => void deleteLead(lead.id)} className="rounded p-1.5 hover:bg-rose-500/10 hover:text-rose-500">
+                                <Trash2 size={16} />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>

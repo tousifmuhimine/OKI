@@ -70,22 +70,25 @@ def get_session_dep(session: AsyncSession = Depends(get_db_session)) -> AsyncSes
     return session
 
 
-async def has_permission(session: AsyncSession, workspace_id: str, user_id: str, permission_key: str) -> bool:
+async def has_permission(session: AsyncSession, workspace_id: str, auth: AuthContext, permission_key: str) -> bool:
+    if auth.role == "admin":
+        return True
+
     from sqlalchemy import select
 
     query = select(PermissionGrant).where(
         PermissionGrant.workspace_id == workspace_id,
-        PermissionGrant.user_id == user_id,
+        PermissionGrant.user_id == auth.user_id,
         PermissionGrant.permission_key == permission_key,
     )
     result = await session.execute(query)
     grant = result.scalar_one_or_none()
     if grant is None:
-        return True
+        return False
     return bool(grant.is_allowed)
 
 
 async def require_permission(permission_key: str, auth: AuthContext, session: AsyncSession) -> None:
-    allowed = await has_permission(session, auth.user_id, auth.user_id, permission_key)
+    allowed = await has_permission(session, auth.user_id, auth, permission_key)
     if not allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied")
