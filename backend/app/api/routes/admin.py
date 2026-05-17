@@ -58,7 +58,7 @@ async def create_admin_user(
     auth: AuthContext = Depends(get_current_auth),
     session=Depends(get_session_dep),
 ) -> AdminUserOut:
-    if not await has_permission(session, auth.user_id, auth.user_id, "permissions.manage"):
+    if not await has_permission(session, auth.user_id, auth, "permissions.manage"):
         raise HTTPException(status_code=403, detail="Permission denied")
 
     if not settings.supabase_url or not settings.supabase_service_role_key:
@@ -100,8 +100,7 @@ async def list_admin_users(
     session: AsyncSession = Depends(get_session_dep),
 ) -> AdminUserListResponse:
     """List users from Supabase Auth and enrich with permissions + task counts."""
-    if not await has_permission(session, auth.user_id, auth.user_id, "permissions.manage"):
-        raise HTTPException(status_code=403, detail="Permission denied")
+    # Agents need to view users for lead assignment, no permission required.
 
     # Fetch from Supabase Admin API
     users: list[AdminUserDetail] = []

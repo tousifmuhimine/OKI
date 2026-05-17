@@ -58,7 +58,7 @@ async def create_customer(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> CustomerOut:
-    if not await has_permission(session, auth.user_id, auth.user_id, "customers.manage"):
+    if not await has_permission(session, auth.user_id, auth, "customers.manage"):
         raise HTTPException(status_code=403, detail="Permission denied")
     entity = Customer(**payload.model_dump())
     if not entity.assigned_user_id:
@@ -163,7 +163,7 @@ async def update_customer(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> CustomerOut:
-    if not await has_permission(session, auth.user_id, auth.user_id, "customers.manage"):
+    if not await has_permission(session, auth.user_id, auth, "customers.manage"):
         raise HTTPException(status_code=403, detail="Permission denied")
     entity = await session.get(Customer, customer_id)
     if not entity:
@@ -183,7 +183,7 @@ async def delete_customer(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> None:
-    if not await has_permission(session, auth.user_id, auth.user_id, "customers.manage"):
+    if not await has_permission(session, auth.user_id, auth, "customers.manage"):
         raise HTTPException(status_code=403, detail="Permission denied")
     entity = await session.get(Customer, customer_id)
     if not entity:

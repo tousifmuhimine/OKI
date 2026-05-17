@@ -19,9 +19,11 @@ def decode_supabase_token(token: str) -> dict:
             algorithms=["HS256"],
             options={"verify_aud": False},
         )
-        # Extract org_id from app_metadata or user_metadata if available in the token
+        # Extract org_id and role from app_metadata or user_metadata if available in the token
         org_id = payload.get("app_metadata", {}).get("org_id") or payload.get("user_metadata", {}).get("org_id")
+        role = payload.get("user_metadata", {}).get("role") or payload.get("app_metadata", {}).get("role") or payload.get("role")
         payload["org_id"] = org_id
+        payload["custom_role"] = role
         return payload
     except JWTError as exc:
         raise AuthError("Invalid auth token") from exc
@@ -53,6 +55,7 @@ async def verify_supabase_token(token: str) -> dict:
     return {
         "sub": user.get("id"),
         "email": user.get("email"),
-        "role": "authenticated",
+        "role": user.get("user_metadata", {}).get("role") or user.get("app_metadata", {}).get("role") or "authenticated",
+        "custom_role": user.get("user_metadata", {}).get("role") or user.get("app_metadata", {}).get("role") or "authenticated",
         "org_id": user.get("user_metadata", {}).get("org_id") or user.get("app_metadata", {}).get("org_id")
     }
