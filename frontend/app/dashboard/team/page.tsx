@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Users, Plus, Mail, ShieldCheck, UserCircle, Trash2,
   RefreshCw, ChevronDown, BarChart2, CheckCircle, Clock,
@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 import { ProtectedPage } from "@/components/protected-page";
+import { Lead, LeadListResponse } from "@/types/crm";
 
 // ─── Types ──────────────────────────────────────────────────────
 type TeamUser = {
@@ -18,6 +19,7 @@ type TeamUser = {
   created_at: string | null;
   permissions: string[];
   task_count: number;
+  lead_count: number;
 };
 
 type TeamListResponse = {
@@ -40,6 +42,9 @@ export default function TeamDataPage() {
   const [users, setUsers] = useState<TeamUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedUser, setSelectedUser] = useState<TeamUser | null>(null);
+  const [selectedLeads, setSelectedLeads] = useState<Lead[]>([]);
+  const [profileLoading, setProfileLoading] = useState(false);
 
   // Add user modal state
   const [showAdd, setShowAdd] = useState(false);
@@ -101,6 +106,20 @@ export default function TeamDataPage() {
       setAddError((err as Error).message);
     } finally {
       setAdding(false);
+    }
+  };
+
+  const openUserProfile = async (user: TeamUser) => {
+    setSelectedUser(user);
+    setProfileLoading(true);
+    setSelectedLeads([]);
+    try {
+      const response = await apiRequest<LeadListResponse>(`/leads?assigned_user_id=${encodeURIComponent(user.id)}&limit=20&offset=0&sort=desc`);
+      setSelectedLeads(response.data);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setProfileLoading(false);
     }
   };
 
@@ -172,7 +191,7 @@ export default function TeamDataPage() {
               ) : (
                 <div className="divide-y divide-white/10 dark:divide-white/5">
                   {admins.map((user) => (
-                    <div key={user.id} className="flex flex-wrap items-center gap-3 px-5 py-4 transition hover:bg-white/30 dark:hover:bg-white/5">
+                    <button key={user.id} type="button" onClick={() => void openUserProfile(user)} className="flex w-full flex-wrap items-center gap-3 px-5 py-4 text-left transition hover:bg-white/30 dark:hover:bg-white/5">
                       {/* Avatar */}
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-purple-400 to-purple-600 text-[11px] font-bold text-white">
                         {(user.name || user.email || user.id)[0].toUpperCase()}
@@ -204,7 +223,7 @@ export default function TeamDataPage() {
                           <span className="text-[9px] text-slate-500">+{user.permissions.length - 4}</span>
                         )}
                       </div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               )}
@@ -243,7 +262,7 @@ export default function TeamDataPage() {
               ) : (
                 <div className="divide-y divide-white/10 dark:divide-white/5">
                   {regularUsers.map((user) => (
-                    <div key={user.id} className="flex flex-wrap items-center gap-3 px-5 py-4 transition hover:bg-white/30 dark:hover:bg-white/5">
+                    <button key={user.id} type="button" onClick={() => void openUserProfile(user)} className="flex w-full flex-wrap items-center gap-3 px-5 py-4 text-left transition hover:bg-white/30 dark:hover:bg-white/5">
                       {/* Avatar */}
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-400 to-indigo-500 text-[11px] font-bold text-white">
                         {(user.name || user.email || user.id)[0].toUpperCase()}
@@ -284,10 +303,77 @@ export default function TeamDataPage() {
                         <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">{user.task_count}</span>
                         <span className="text-[9px] text-slate-500">tasks</span>
                       </div>
-                    </div>
+
+                      <div className="flex items-center gap-1.5 rounded-xl bg-brand-500/10 px-2.5 py-1.5">
+                        <Users size={11} className="text-brand-600 dark:text-brand-300" />
+                        <span className="text-xs font-semibold text-brand-700 dark:text-brand-300">{user.lead_count}</span>
+                        <span className="text-[9px] text-brand-600/80 dark:text-brand-300/80">leads</span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 rounded-xl bg-brand-500/10 px-2.5 py-1.5">
+                        <Users size={11} className="text-brand-600 dark:text-brand-300" />
+                        <span className="text-xs font-semibold text-brand-700 dark:text-brand-300">{user.lead_count}</span>
+                        <span className="text-[9px] text-brand-600/80 dark:text-brand-300/80">leads</span>
+                      </div>
+                    </button>
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {selectedUser && (
+          <div className="fixed inset-0 z-50 flex items-center justify-end bg-slate-950/40 backdrop-blur-sm p-3">
+            <div className="flex h-full w-full max-w-xl flex-col rounded-2xl border border-white/20 bg-white/95 shadow-2xl backdrop-blur-2xl dark:bg-slate-900/95">
+              <div className="flex items-center justify-between border-b border-white/20 px-5 py-4 dark:border-white/10">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-widest text-brand-500 dark:text-brand-400">User Profile</p>
+                  <h2 className="mt-1 text-xl font-bold text-slate-900 dark:text-white">{selectedUser.name || selectedUser.email || selectedUser.id}</h2>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">Assigned leads and permissions</p>
+                </div>
+                <button type="button" onClick={() => setSelectedUser(null)} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10">
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="grid gap-3 px-5 py-4 sm:grid-cols-3">
+                <div className="rounded-2xl border border-white/20 bg-white/40 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+                  <div className="text-[10px] uppercase tracking-widest text-slate-500 dark:text-slate-400">Tasks</div>
+                  <div className="mt-1 text-xl font-bold text-slate-900 dark:text-white">{selectedUser.task_count}</div>
+                </div>
+                <div className="rounded-2xl border border-white/20 bg-white/40 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+                  <div className="text-[10px] uppercase tracking-widest text-slate-500 dark:text-slate-400">Leads</div>
+                  <div className="mt-1 text-xl font-bold text-slate-900 dark:text-white">{selectedUser.lead_count}</div>
+                </div>
+                <div className="rounded-2xl border border-white/20 bg-white/40 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+                  <div className="text-[10px] uppercase tracking-widest text-slate-500 dark:text-slate-400">Permissions</div>
+                  <div className="mt-1 text-xl font-bold text-slate-900 dark:text-white">{selectedUser.permissions.length}</div>
+                </div>
+              </div>
+
+              <div className="px-5 pb-5">
+                <h3 className="mb-3 text-sm font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Assigned Leads</h3>
+                <div className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
+                  {profileLoading ? (
+                    <div className="flex items-center justify-center py-10 text-brand-500"><Loader2 size={18} className="animate-spin" /></div>
+                  ) : selectedLeads.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-white/20 bg-white/30 px-4 py-8 text-sm text-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-slate-400">
+                      No leads are assigned to this user.
+                    </div>
+                  ) : selectedLeads.map((lead) => (
+                    <div key={lead.id} className="rounded-2xl border border-white/20 bg-white/40 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-slate-900 dark:text-white">{lead.company_name}</p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">{lead.contact_person || lead.email || lead.source || "Lead"}</p>
+                        </div>
+                        <span className="rounded-full bg-brand-500/15 px-3 py-1 text-[11px] font-semibold text-brand-700 dark:text-brand-300">{lead.status}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         )}

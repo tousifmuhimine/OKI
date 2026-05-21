@@ -7,6 +7,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, get_current_auth, get_session_dep
+from app.api.deps import has_permission
 from app.db.models import AuditLog, Contact, Conversation, Customer, Inbox, Lead, LeadActivity, LeadArea, LeadProfession, LeadSector, LeadSource, LeadStage, LeadShareLink, Message, Opportunity, Organization, SalesOrder, Task, UserLLMConfig
 from app.inbox.security import decrypt_channel_config
 from app.schemas.common import PaginationMeta
@@ -83,6 +84,18 @@ def _normalize_emails(emails: list[str] | None) -> list[str]:
     return unique
 
 
+async def _can_view_all_leads(auth: AuthContext, session: AsyncSession) -> bool:
+    return auth.role == "admin" or await has_permission(session, auth.user_id, auth, "leads.manage")
+
+
+async def _can_view_leads(auth: AuthContext, session: AsyncSession) -> bool:
+    return auth.role == "admin" or await has_permission(session, auth.user_id, auth, "leads.view") or await _can_view_all_leads(auth, session)
+
+
+def _is_assigned_lead(lead: Lead, auth: AuthContext) -> bool:
+    return lead.assigned_user_id == auth.user_id or lead.assigned_agent_id == auth.user_id
+
+
 @router.get("", response_model=LeadListResponse)
 async def list_leads(
     status_filter: str | None = Query(default=None, alias="status"),
@@ -93,6 +106,7 @@ async def list_leads(
     search: str | None = Query(default=None),
     start_date: datetime | None = Query(default=None),
     end_date: datetime | None = Query(default=None),
+    assigned_user_id: str | None = Query(default=None),
     quick_filter: str | None = Query(default=None),
     sort: str = Query(default="desc", pattern="^(asc|desc)$"),
     limit: int = Query(default=20, ge=1, le=100),
@@ -100,6 +114,13 @@ async def list_leads(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> LeadListResponse:
+    assigned_scope_requested = quick_filter == "assigned_to_me"
+    assigned_user_lookup_requested = bool(assigned_user_id)
+    if assigned_user_lookup_requested and auth.role != "admin" and not await _can_view_all_leads(auth, session):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    if not assigned_scope_requested and not await _can_view_leads(auth, session):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
     filters = []
 
     if status_filter and status_filter != "all":
@@ -128,7 +149,11 @@ async def list_leads(
         filters.append(Lead.created_at >= start_date)
     if end_date:
         filters.append(Lead.created_at <= end_date)
-    if quick_filter == "assigned_to_me":
+    if auth.role != "admin" and not await _can_view_all_leads(auth, session):
+        filters.append(or_(Lead.assigned_user_id == auth.user_id, Lead.assigned_agent_id == auth.user_id))
+    if assigned_user_lookup_requested:
+        filters.append(or_(Lead.assigned_user_id == assigned_user_id, Lead.assigned_agent_id == assigned_user_id))
+    if assigned_scope_requested:
         filters.append(or_(Lead.assigned_user_id == auth.user_id, Lead.assigned_agent_id == auth.user_id))
     elif quick_filter == "untouched":
         filters.append(Lead.untouched.is_(True))
@@ -246,7 +271,7 @@ async def ai_convert_notes(
 @router.get("/from-conversation/{conversation_id}", response_model=LeadOut)
 async def get_lead_from_conversation(
     conversation_id: str,
-    _: AuthContext = Depends(get_current_auth),
+    auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> LeadOut:
     lead = (
@@ -258,6 +283,8 @@ async def get_lead_from_conversation(
         )
     ).scalar_one_or_none()
     if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found for conversation")
+    if auth.role != "admin" and not await _can_view_all_leads(auth, session) and not _is_assigned_lead(lead, auth):
         raise HTTPException(status_code=404, detail="Lead not found for conversation")
     return LeadOut.model_validate(lead)
 
@@ -293,10 +320,12 @@ async def create_lead_from_conversation(
 @router.get("/{lead_id}", response_model=LeadOut)
 async def get_lead(
     lead_id: str,
-    _: AuthContext = Depends(get_current_auth),
+    auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> LeadOut:
     lead = await _get_lead_or_404(lead_id, session)
+    if auth.role != "admin" and not await _can_view_all_leads(auth, session) and not _is_assigned_lead(lead, auth):
+        raise HTTPException(status_code=404, detail="Lead not found")
     return LeadOut.model_validate(lead)
 
 
@@ -309,6 +338,8 @@ async def update_lead(
 ) -> LeadOut:
     lead = await _get_lead_or_404(lead_id, session)
     changes = payload.model_dump(exclude_unset=True)
+    if auth.role != "admin" and not await _can_view_all_leads(auth, session) and not _is_assigned_lead(lead, auth):
+        raise HTTPException(status_code=403, detail="Permission denied")
     if changes.get("priority"):
         changes["priority"] = changes["priority"].lower()
     if "tags" in changes:
@@ -357,10 +388,12 @@ async def update_lead(
 @router.delete("/{lead_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_lead(
     lead_id: str,
-    _: AuthContext = Depends(get_current_auth),
+    auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> None:
     lead = await _get_lead_or_404(lead_id, session)
+    if auth.role != "admin" and not await _can_view_all_leads(auth, session):
+        raise HTTPException(status_code=403, detail="Permission denied")
     await session.delete(lead)
     await session.commit()
 
@@ -369,10 +402,12 @@ async def delete_lead(
 async def list_lead_activities(
     lead_id: str,
     activity_type: str | None = Query(default=None),
-    _: AuthContext = Depends(get_current_auth),
+    auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> list[LeadActivityOut]:
-    await _get_lead_or_404(lead_id, session)
+    lead = await _get_lead_or_404(lead_id, session)
+    if auth.role != "admin" and not await _can_view_all_leads(auth, session) and not _is_assigned_lead(lead, auth):
+        raise HTTPException(status_code=404, detail="Lead not found")
     query = select(LeadActivity).where(LeadActivity.lead_id == lead_id)
     if activity_type:
         query = query.where(LeadActivity.activity_type == activity_type)
@@ -384,10 +419,12 @@ async def list_lead_activities(
 @router.get("/{lead_id}/timeline", response_model=list[LeadTimelineItem])
 async def get_lead_timeline(
     lead_id: str,
-    _: AuthContext = Depends(get_current_auth),
+    auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> list[LeadTimelineItem]:
     lead = await _get_lead_or_404(lead_id, session)
+    if auth.role != "admin" and not await _can_view_all_leads(auth, session) and not _is_assigned_lead(lead, auth):
+        raise HTTPException(status_code=404, detail="Lead not found")
     items: list[LeadTimelineItem] = [
         LeadTimelineItem(
             id=activity.id,
@@ -441,6 +478,8 @@ async def create_lead_activity(
     session: AsyncSession = Depends(get_session_dep),
 ) -> LeadActivityOut:
     lead = await _get_lead_or_404(lead_id, session)
+    if auth.role != "admin" and not await _can_view_all_leads(auth, session) and not _is_assigned_lead(lead, auth):
+        raise HTTPException(status_code=404, detail="Lead not found")
     data = payload.model_dump(by_alias=False)
     metadata = data.pop("metadata", None)
     activity = LeadActivity(
@@ -466,6 +505,8 @@ async def create_lead_share_link(
     session: AsyncSession = Depends(get_session_dep),
 ) -> LeadShareOut:
     await _get_lead_or_404(lead_id, session)
+    if auth.role != "admin" and not await _can_view_all_leads(auth, session):
+        raise HTTPException(status_code=403, detail="Permission denied")
     org = None
     if auth.org_id:
         org = await session.get(Organization, auth.org_id)
@@ -514,10 +555,12 @@ async def update_lead_activity(
     lead_id: str,
     activity_id: str,
     payload: LeadActivityUpdate,
-    _: AuthContext = Depends(get_current_auth),
+    auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> LeadActivityOut:
-    await _get_lead_or_404(lead_id, session)
+    lead = await _get_lead_or_404(lead_id, session)
+    if auth.role != "admin" and not await _can_view_all_leads(auth, session) and not _is_assigned_lead(lead, auth):
+        raise HTTPException(status_code=404, detail="Lead not found")
     activity = await session.get(LeadActivity, activity_id)
     if not activity or activity.lead_id != lead_id:
         raise HTTPException(status_code=404, detail="Lead activity not found")
@@ -536,10 +579,12 @@ async def update_lead_activity(
 async def delete_lead_activity(
     lead_id: str,
     activity_id: str,
-    _: AuthContext = Depends(get_current_auth),
+    auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> None:
-    await _get_lead_or_404(lead_id, session)
+    lead = await _get_lead_or_404(lead_id, session)
+    if auth.role != "admin" and not await _can_view_all_leads(auth, session) and not _is_assigned_lead(lead, auth):
+        raise HTTPException(status_code=404, detail="Lead not found")
     activity = await session.get(LeadActivity, activity_id)
     if not activity or activity.lead_id != lead_id:
         raise HTTPException(status_code=404, detail="Lead activity not found")
@@ -555,6 +600,8 @@ async def convert_lead(
     session: AsyncSession = Depends(get_session_dep),
 ):
     lead = await _get_lead_or_404(lead_id, session)
+    if auth.role != "admin" and not await _can_view_all_leads(auth, session):
+        raise HTTPException(status_code=403, detail="Permission denied")
     if lead.converted_customer_id:
         customer = await session.get(Customer, lead.converted_customer_id)
         if customer:

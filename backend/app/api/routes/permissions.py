@@ -10,6 +10,23 @@ from app.schemas.permission import PermissionGrantCreate, PermissionGrantListRes
 
 router = APIRouter()
 
+
+@router.get("/me", response_model=list[str])
+async def list_my_permissions(
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> list[str]:
+    rows = (
+        await session.execute(
+            select(PermissionGrant.permission_key).where(
+                PermissionGrant.workspace_id == auth.user_id,
+                PermissionGrant.user_id == auth.user_id,
+                PermissionGrant.is_allowed == True,
+            )
+        )
+    ).scalars().all()
+    return list(rows)
+
 ROLE_PERMISSION_PRESETS: dict[str, list[str]] = {
     "admin": [
         "customers.manage",
@@ -42,6 +59,8 @@ async def apply_permission_preset(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> PermissionPresetResponse:
+    if auth.role != "admin":
+        raise HTTPException(status_code=403, detail="Permission denied")
     permissions = ROLE_PERMISSION_PRESETS.get(payload.role.lower())
     if not permissions:
         raise HTTPException(status_code=400, detail="Unsupported permission preset")
@@ -80,6 +99,8 @@ async def list_permission_grants(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> PermissionGrantListResponse:
+    if auth.role != "admin":
+        raise HTTPException(status_code=403, detail="Permission denied")
     query = select(PermissionGrant).where(PermissionGrant.workspace_id == auth.user_id)
     count_query = select(func.count(PermissionGrant.id)).where(PermissionGrant.workspace_id == auth.user_id)
 
@@ -103,6 +124,8 @@ async def create_permission_grant(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> PermissionGrantOut:
+    if auth.role != "admin":
+        raise HTTPException(status_code=403, detail="Permission denied")
     existing = (
         await session.execute(
             select(PermissionGrant).where(
@@ -138,6 +161,8 @@ async def update_permission_grant(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> PermissionGrantOut:
+    if auth.role != "admin":
+        raise HTTPException(status_code=403, detail="Permission denied")
     grant = await session.get(PermissionGrant, grant_id)
     if not grant or grant.workspace_id != auth.user_id:
         raise HTTPException(status_code=404, detail="Permission grant not found")
@@ -153,6 +178,8 @@ async def delete_permission_grant(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> None:
+    if auth.role != "admin":
+        raise HTTPException(status_code=403, detail="Permission denied")
     grant = await session.get(PermissionGrant, grant_id)
     if not grant or grant.workspace_id != auth.user_id:
         raise HTTPException(status_code=404, detail="Permission grant not found")

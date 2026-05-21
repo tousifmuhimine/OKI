@@ -25,9 +25,14 @@ type PermissionGrantListResponse = {
 };
 
 const permissionOptions = [
+  "leads.view",
   "customers.manage",
+  "customers.view",
   "leads.manage",
+  "tasks.view",
   "tasks.manage",
+  "analytics.view",
+  "chat.manage",
   "ai.settings",
   "permissions.manage",
 ] as const;

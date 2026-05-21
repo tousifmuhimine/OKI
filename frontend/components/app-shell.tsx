@@ -18,9 +18,15 @@ import { clearAllAuthState, isDemoSessionActive } from "@/lib/demo-auth";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 
 type CurrentUser = {
+  id: string | null;
   name: string;
   role: string;
   initials: string;
+  permissions: string[];
+};
+
+type PermissionGrantListResponse = {
+  data: string[];
 };
 
 const primaryNav = [
@@ -47,6 +53,18 @@ const secondaryNav = [
   { label: "Pipeline",   icon: TrendingUp, href: "/pipeline" },
   { label: "Team Data",  icon: BarChart2, href: "/dashboard/team" },
   { label: "Synergy",    icon: Infinity,  href: "/dashboard/synergy" },
+];
+
+const routePermissions = [
+  { href: "/customers", permissions: ["customers.view", "customers.manage"] },
+  { href: "/leads", permissions: ["leads.view", "leads.manage"] },
+  { href: "/dashboard/team", permissions: ["permissions.manage"] },
+  { href: "/dashboard/synergy", permissions: ["analytics.view"] },
+  { href: "/dashboard/ai-monitor", permissions: ["analytics.view", "ai.settings"] },
+  { href: "/dashboard/ai-notification", permissions: ["ai.settings"] },
+  { href: "/dashboard/settings/channels", permissions: ["ai.settings"] },
+  { href: "/dashboard/settings/ai", permissions: ["ai.settings"] },
+  { href: "/dashboard/settings/permissions", permissions: ["permissions.manage"] },
 ];
 
 function ThemeToggle() {
@@ -93,32 +111,69 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // Current User State
   const [currentUser, setCurrentUser] = useState<CurrentUser>({
+    id: null,
     name: "Admin",
     role: "admin",
     initials: "AD",
+    permissions: [],
   });
+
+  const hasPermission = (permissionKey: string) => {
+    const permissions = Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
+    return currentUser.role === "admin" || permissions.includes(permissionKey);
+  };
+
+  const canAccessPath = (path: string | null) => {
+    if (!path) return true;
+    const rule = routePermissions.find((item) => path === item.href || path.startsWith(`${item.href}/`));
+    if (!rule) return true;
+    return rule.permissions.some((permission) => hasPermission(permission));
+  };
 
   useEffect(() => {
     async function loadUser() {
       if (isDemoSessionActive()) {
-        setCurrentUser({ name: "Demo User", role: "admin", initials: "DU" });
+        setCurrentUser({
+          id: "demo-user",
+          name: "Demo User",
+          role: "admin",
+          initials: "DU",
+          permissions: ["customers.manage", "leads.manage", "tasks.manage", "analytics.view", "chat.manage", "ai.settings", "permissions.manage"],
+        });
         return;
       }
       if (isSupabaseConfigured()) {
         const { data } = await getSupabaseClient().auth.getSession();
-        const meta = data.session?.user?.user_metadata;
+        const user = data.session?.user;
+        const meta = user?.user_metadata;
         if (meta) {
-          const name = meta.name || data.session?.user?.email?.split("@")[0] || "User";
+          const name = meta.name || user?.email?.split("@")[0] || "User";
           const role = meta.role || "agent";
           const initials = name.slice(0, 2).toUpperCase();
-          setCurrentUser({ name, role, initials });
+          let permissions: string[] = [];
+          if (user?.id) {
+            try {
+              const response = await apiRequest<PermissionGrantListResponse>("/permissions/me");
+              permissions = response.data;
+            } catch {
+              permissions = [];
+            }
+          }
+          setCurrentUser({ id: user?.id ?? null, name, role, initials, permissions });
         } else {
-          setCurrentUser({ name: "User", role: "agent", initials: "US" });
+          setCurrentUser({ id: user?.id ?? null, name: "User", role: "agent", initials: "US", permissions: [] });
         }
       }
     }
     loadUser();
   }, [pathname]);
+
+  useEffect(() => {
+    if (isLogin) return;
+    if (!canAccessPath(pathname)) {
+      router.replace("/dashboard");
+    }
+  }, [pathname, currentUser.role, currentUser.permissions, router, isLogin]);
 
   useEffect(() => {
     setMobileMenuOpen(false);
@@ -185,7 +240,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {/* Primary nav */}
         <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2 py-3">
           {primaryNav.map((item) => {
-            if (currentUser.role !== "admin" && (item.href.includes("settings") || item.href.includes("ai-monitor"))) return null;
+            if (!canAccessPath(item.href)) return null;
             const active = isRouteActive(pathname, item.href);
             const Icon   = item.icon;
             return (
@@ -216,7 +271,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="my-2 h-px bg-slate-200/50 dark:bg-white/10" />
 
           {secondaryNav.slice(1).map((item) => {
-            if (currentUser.role !== "admin" && (item.href === "/dashboard/team" || item.href === "/dashboard/synergy")) return null;
+            if (item.href && !canAccessPath(item.href)) return null;
             const Icon = item.icon;
             const active = item.href ? isRouteActive(pathname, item.href) : false;
             const className = `relative flex flex-col items-center justify-center gap-1 rounded-xl py-3 text-[10px] transition ${
@@ -256,7 +311,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <HelpCircle size={16} strokeWidth={1.6} />
             <span>Help</span>
           </div>
-          {currentUser.role === "admin" && (
+          {hasPermission("permissions.manage") && (
             <Link href="/dashboard/settings/channels" className={`flex flex-col items-center gap-1 rounded-xl py-2.5 text-[10px] transition ${
               pathname?.startsWith("/dashboard/settings")
                 ? "bg-slate-900/8 text-slate-900 dark:bg-white/12 dark:text-white"
@@ -342,7 +397,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </div>
               <div className="hidden xl:flex flex-col items-start justify-center text-left">
                 <span className="text-xs font-medium text-slate-800 dark:text-slate-200 capitalize leading-none">{currentUser.name}</span>
-                {currentUser.role === "admin" && (
+                {hasPermission("permissions.manage") && (
                   <span className="text-[9px] font-bold uppercase tracking-wider text-brand-500 dark:text-brand-400 mt-0.5">Admin Access</span>
                 )}
               </div>
@@ -367,7 +422,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   <ArrowRight size={14} />
                   Switch account
                 </button>
-                {currentUser.role === "admin" && (
+                {hasPermission("permissions.manage") && (
                   <Link
                     href="/dashboard/settings/permissions"
                     className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-600 transition hover:bg-white/70 dark:text-slate-300 dark:hover:bg-white/10"
@@ -422,6 +477,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
             <div className="space-y-1 overflow-y-auto">
               {primaryNav.map((item) => {
+                if (!canAccessPath(item.href)) return null;
                 const active = isRouteActive(pathname, item.href);
                 const Icon = item.icon;
                 return (
@@ -445,6 +501,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <div className="my-3 h-px bg-slate-800/80" />
 
               {secondaryNav.slice(1).map((item) => {
+                if (item.href && !canAccessPath(item.href)) return null;
                 const active = item.href ? isRouteActive(pathname, item.href) : false;
                 const Icon = item.icon;
                 const content = (
@@ -484,18 +541,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <span className="text-sm font-medium text-slate-200">Theme</span>
                 <ThemeToggle />
               </div>
-              <Link
-                href="/dashboard/settings/channels"
-                onClick={() => setMobileMenuOpen(false)}
-                className={`mb-2 flex min-h-12 items-center gap-3 rounded-2xl px-3 text-sm font-medium transition ${
-                  pathname?.startsWith("/dashboard/settings")
-                    ? "bg-white/12 text-white"
-                    : "text-slate-300 hover:bg-white/10"
-                }`}
-              >
-                <Settings size={18} />
-                <span>Settings</span>
-              </Link>
+              {hasPermission("permissions.manage") && (
+                <Link
+                  href="/dashboard/settings/channels"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`mb-2 flex min-h-12 items-center gap-3 rounded-2xl px-3 text-sm font-medium transition ${
+                    pathname?.startsWith("/dashboard/settings")
+                      ? "bg-white/12 text-white"
+                      : "text-slate-300 hover:bg-white/10"
+                  }`}
+                >
+                  <Settings size={18} />
+                  <span>Settings</span>
+                </Link>
+              )}
               <button
                 type="button"
                 onClick={signOut}
@@ -514,7 +573,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         className="fixed inset-x-0 bottom-0 z-50 border-t border-white/30 bg-white/80 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-12px_30px_rgba(15,23,42,0.12)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/80 lg:hidden"
       >
         <div className="mx-auto grid max-w-md grid-cols-5 gap-1">
-          {mobileNav.map((item) => {
+          {mobileNav.filter((item) => canAccessPath(item.href)).map((item) => {
             const active = isRouteActive(pathname, item.href);
             const Icon = item.icon;
             return (

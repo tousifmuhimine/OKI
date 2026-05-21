@@ -158,6 +158,7 @@ export default function DashboardPage() {
   const [now, setNow] = useState(new Date());
   const [activeTimezone, setActiveTimezone] = useState({ label: "Dhaka", tz: "Asia/Dhaka" });
   const [clockDropdownOpen, setClockDropdownOpen] = useState(false);
+  const adminView = userRole === "admin";
   const topLeadSources = useMemo(() => {
     return Object.entries(data?.lead_source_breakdown ?? {})
       .sort((a, b) => b[1] - a[1])
@@ -175,6 +176,28 @@ export default function DashboardPage() {
   }, [data]);
   const platformAnalytics = useMemo(() => data?.platform_analytics ?? [], [data]);
   const showAssignedBuckets = Boolean(userRole && userRole !== "admin");
+  const assignedLeadCounts = useMemo(() => {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfWeek = new Date(startOfToday);
+    startOfWeek.setDate(startOfToday.getDate() - startOfToday.getDay());
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const toDate = (value: string | null | undefined) => (value ? new Date(value) : null);
+    return {
+      daily: bucketLeads.filter((lead) => {
+        const createdAt = toDate(lead.created_at);
+        return createdAt ? createdAt >= startOfToday : false;
+      }).length,
+      weekly: bucketLeads.filter((lead) => {
+        const createdAt = toDate(lead.created_at);
+        return createdAt ? createdAt >= startOfWeek : false;
+      }).length,
+      monthly: bucketLeads.filter((lead) => {
+        const createdAt = toDate(lead.created_at);
+        return createdAt ? createdAt >= startOfMonth : false;
+      }).length,
+    };
+  }, [bucketLeads]);
 
   // Calendar State
   const [events, setEvents] = useState<TaskEvent[]>([]);
@@ -186,15 +209,25 @@ export default function DashboardPage() {
 
   useEffect(() => {
     let alive = true;
-    Promise.all([
-      apiRequest<DashboardSummary>("/dashboard/summary"),
-      apiRequest<CustomerListResponse>("/customers?limit=8&offset=0"),
-    ]).then(([summary, cust]) => {
-      if (!alive) return;
-      setData(summary); setCustomers(cust.data); setError(null);
-    }).catch((e: Error) => { if (alive) setError(e.message); });
+    if (adminView) {
+      Promise.all([
+        apiRequest<DashboardSummary>("/dashboard/summary"),
+        apiRequest<CustomerListResponse>("/customers?limit=8&offset=0"),
+      ]).then(([summary, cust]) => {
+        if (!alive) return;
+        setData(summary); setCustomers(cust.data); setError(null);
+      }).catch((e: Error) => { if (alive) setError(e.message); });
+    } else if (userId) {
+      apiRequest<{ data: any[] }>("/leads?quick_filter=assigned_to_me&sort=desc&limit=50")
+        .then((response) => {
+          if (!alive) return;
+          setBucketLeads(response.data || []);
+          setError(null);
+        })
+        .catch((e: Error) => { if (alive) setError(e.message); });
+    }
     return () => { alive = false; };
-  }, []);
+  }, [adminView, userId]);
 
   useEffect(() => {
     const t = window.setInterval(() => setNow(new Date()), 1000);
@@ -203,7 +236,7 @@ export default function DashboardPage() {
 
 
   useEffect(() => {
-    if (!userId || userRole === "admin") return;
+    if (!userId || adminView) return;
     let alive = true;
     async function loadBucket() {
       setLoadingBucket(true);
@@ -217,13 +250,9 @@ export default function DashboardPage() {
         }
         const sd = start.toISOString();
         
-        const [leadsRes, tasksRes] = await Promise.all([
-          apiRequest("/leads?quick_filter=assigned_to_me&start_date=" + sd + "&sort=desc&limit=20"),
-          apiRequest("/tasks?assigned_user_id=" + userId + "&start_date=" + sd + "&limit=20")
-        ]);
+        const leadsRes = await apiRequest("/leads?quick_filter=assigned_to_me&start_date=" + sd + "&sort=desc&limit=20");
         if (!alive) return;
         setBucketLeads((leadsRes as any).data || []);
-        setBucketTasks((tasksRes as any).data || []);
       } catch (err) {
         console.error("Failed to load buckets", err);
       } finally {
@@ -232,7 +261,7 @@ export default function DashboardPage() {
     }
     loadBucket();
     return () => { alive = false; };
-  }, [bucketTab, userId, userRole]);
+  }, [bucketTab, userId, adminView]);
 
   useEffect(() => {
     getSupabaseClient().auth.getUser().then(({ data }) => {
@@ -251,6 +280,7 @@ export default function DashboardPage() {
 
   // Fetch events for the current month
   const loadEvents = async () => {
+    if (!adminView) return;
     setLoadingEvents(true);
     try {
       const year = currentDate.getFullYear();
@@ -265,11 +295,12 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    loadEvents();
-  }, [currentDate.getMonth(), currentDate.getFullYear()]);
+    void loadEvents();
+  }, [currentDate.getMonth(), currentDate.getFullYear(), adminView]);
 
   const handleAddEvent = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!adminView) return;
     if (!newEvent.title || !newEvent.due_date) return;
     try {
       const due = new Date(newEvent.due_date).toISOString();
@@ -384,6 +415,72 @@ export default function DashboardPage() {
       </div>
     );
   };
+
+  if (!adminView) {
+    return (
+      <ProtectedPage>
+        <section className="min-h-[calc(100vh-54px)] bg-transparent px-6 pb-10 pt-6">
+          <div className="mb-5 flex flex-wrap items-end justify-between gap-4 animate-fade-up">
+            <div>
+              <h1 className="text-[22px] font-bold tracking-tight text-slate-900 dark:text-white">
+                Good afternoon, {userName} 👋
+              </h1>
+              <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-300 drop-shadow-sm">{todayStr} · Your assigned leads only</p>
+            </div>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+            <div className="glass-card rounded-2xl p-5 animate-fade-up">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-widest text-brand-500 dark:text-brand-400">Assigned Leads</p>
+                  <h2 className="mt-1 text-lg font-bold text-slate-900 dark:text-white">Only leads assigned to you</h2>
+                </div>
+                <span className="rounded-full bg-brand-500/15 px-3 py-1 text-xs font-bold text-brand-600 dark:text-brand-300">{bucketLeads.length} open</span>
+              </div>
+
+              <div className="space-y-3">
+                {bucketLeads.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-white/30 bg-white/20 px-4 py-10 text-center text-sm text-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-slate-400">
+                    No leads assigned to you yet.
+                  </div>
+                ) : bucketLeads.map((lead) => (
+                  <div key={lead.id} className="flex items-center justify-between rounded-2xl border border-white/20 bg-white/30 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+                    <div>
+                      <p className="font-semibold text-slate-900 dark:text-white">{lead.company_name || lead.name || "Unnamed lead"}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{lead.contact_person || lead.source || "Assigned lead"}</p>
+                    </div>
+                    <span className="rounded-full bg-slate-900/5 px-3 py-1 text-[11px] font-semibold text-slate-600 dark:bg-white/10 dark:text-slate-300">
+                      {lead.status || "new"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="glass-card rounded-2xl p-5 animate-fade-up">
+              <p className="text-xs font-semibold uppercase tracking-widest text-brand-500 dark:text-brand-400">Assignment Window</p>
+              <h2 className="mt-1 text-lg font-bold text-slate-900 dark:text-white">{bucketTab}</h2>
+              <div className="mt-4 grid gap-3">
+                <div className="flex items-center justify-between rounded-2xl border border-white/20 bg-white/30 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+                  <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Daily</span>
+                  <span className="rounded-full bg-brand-500/15 px-3 py-1 text-xs font-bold text-brand-600 dark:text-brand-300">{assignedLeadCounts.daily}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-2xl border border-white/20 bg-white/30 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+                  <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Weekly</span>
+                  <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-bold text-emerald-600 dark:text-emerald-300">{assignedLeadCounts.weekly}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-2xl border border-white/20 bg-white/30 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+                  <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Monthly</span>
+                  <span className="rounded-full bg-amber-500/15 px-3 py-1 text-xs font-bold text-amber-600 dark:text-amber-300">{assignedLeadCounts.monthly}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </ProtectedPage>
+    );
+  }
 
   return (
     <ProtectedPage>

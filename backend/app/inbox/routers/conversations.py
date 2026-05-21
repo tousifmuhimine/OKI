@@ -5,7 +5,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, get_current_auth, get_session_dep
-from app.db.models import Contact, Conversation, Inbox, Message
+from app.api.deps import has_permission
+from app.db.models import Contact, Conversation, Inbox, Lead, Message
 from app.inbox.channels import ChannelSendError, send_channel_message
 from app.inbox.channels.email import send_direct_message
 from app.inbox.security import decrypt_channel_config, summarize_channel_config
@@ -75,6 +76,26 @@ async def _get_owned_conversation(
     return conversation
 
 
+async def _can_view_all_conversations(auth: AuthContext, session: AsyncSession) -> bool:
+    return auth.role == "admin" or await has_permission(session, auth.user_id, auth, "chat.manage")
+
+
+async def _can_access_conversation(conversation: Conversation, auth: AuthContext, session: AsyncSession) -> bool:
+    if await _can_view_all_conversations(auth, session):
+        return True
+    if conversation.assigned_user_id == auth.user_id:
+        return True
+    lead_match = (
+        await session.execute(
+            select(Lead.id).where(
+                Lead.conversation_id == conversation.id,
+                (Lead.assigned_user_id == auth.user_id) | (Lead.assigned_agent_id == auth.user_id),
+            )
+        )
+    ).scalar_one_or_none()
+    return bool(lead_match)
+
+
 def _conversation_out(
     conversation: Conversation,
     contact: Contact | None,
@@ -124,6 +145,7 @@ async def list_conversations(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> ConversationListResponse:
+    can_view_all = await _can_view_all_conversations(auth, session)
     query = (
         select(Conversation, Contact, Inbox)
         .join(Contact, Contact.id == Conversation.contact_id)
@@ -131,6 +153,9 @@ async def list_conversations(
         .where(Conversation.workspace_id == auth.user_id)
     )
     count_query = select(func.count(Conversation.id)).where(Conversation.workspace_id == auth.user_id)
+    if not can_view_all:
+        query = query.where(Conversation.assigned_user_id == auth.user_id)
+        count_query = count_query.where(Conversation.assigned_user_id == auth.user_id)
 
     if status_filter:
         query = query.where(Conversation.status == status_filter)
@@ -214,6 +239,8 @@ async def get_conversation(
     session: AsyncSession = Depends(get_session_dep),
 ) -> ConversationOut:
     conversation = await _get_owned_conversation(conversation_id, auth.user_id, session)
+    if auth.role != "admin" and not await _can_access_conversation(conversation, auth, session):
+        raise HTTPException(status_code=404, detail="Conversation not found")
     contact = await session.get(Contact, conversation.contact_id)
     inbox = await session.get(Inbox, conversation.inbox_id)
     last_message = (
@@ -235,6 +262,8 @@ async def pause_conversation(
     session: AsyncSession = Depends(get_session_dep),
 ) -> ConversationOut:
     conversation = await _get_owned_conversation(conversation_id, auth.user_id, session)
+    if auth.role != "admin" and not await _can_access_conversation(conversation, auth, session):
+        raise HTTPException(status_code=404, detail="Conversation not found")
     conversation.is_bot_paused = True
     if not conversation.assigned_user_id:
         conversation.assigned_user_id = auth.user_id
@@ -251,6 +280,8 @@ async def resume_conversation(
     session: AsyncSession = Depends(get_session_dep),
 ) -> ConversationOut:
     conversation = await _get_owned_conversation(conversation_id, auth.user_id, session)
+    if auth.role != "admin" and not await _can_access_conversation(conversation, auth, session):
+        raise HTTPException(status_code=404, detail="Conversation not found")
     conversation.is_bot_paused = False
     await session.commit()
     await session.refresh(conversation)
@@ -265,6 +296,8 @@ async def takeover_conversation(
     session: AsyncSession = Depends(get_session_dep),
 ) -> ConversationOut:
     conversation = await _get_owned_conversation(conversation_id, auth.user_id, session)
+    if auth.role != "admin" and not await _can_access_conversation(conversation, auth, session):
+        raise HTTPException(status_code=404, detail="Conversation not found")
     conversation.is_bot_paused = True
     conversation.assigned_user_id = auth.user_id
     await session.commit()
@@ -281,7 +314,9 @@ async def list_messages(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> MessageListResponse:
-    await _get_owned_conversation(conversation_id, auth.user_id, session)
+    conversation = await _get_owned_conversation(conversation_id, auth.user_id, session)
+    if auth.role != "admin" and not await _can_access_conversation(conversation, auth, session):
+        raise HTTPException(status_code=404, detail="Conversation not found")
 
     query = (
         select(Message)
@@ -313,6 +348,8 @@ async def create_message(
     session: AsyncSession = Depends(get_session_dep),
 ) -> MessageOut:
     conversation = await _get_owned_conversation(conversation_id, auth.user_id, session)
+    if auth.role != "admin" and not await _can_access_conversation(conversation, auth, session):
+        raise HTTPException(status_code=404, detail="Conversation not found")
     inbox = await session.get(Inbox, conversation.inbox_id)
     contact = await session.get(Contact, conversation.contact_id)
     if not inbox or inbox.workspace_id != auth.user_id:

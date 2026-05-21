@@ -13,6 +13,10 @@ from app.schemas.task import TaskCreate, TaskListResponse, TaskOut, TaskUpdate
 router = APIRouter()
 
 
+async def _can_view_tasks(auth: AuthContext, session: AsyncSession) -> bool:
+    return auth.role == "admin" or await has_permission(session, auth.user_id, auth, "tasks.manage")
+
+
 @router.get("", response_model=TaskListResponse)
 async def list_tasks(
     entity_type: str | None = Query(default=None),
@@ -23,9 +27,12 @@ async def list_tasks(
     assigned_user_id: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-    _: AuthContext = Depends(get_current_auth),
+    auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> TaskListResponse:
+    if not await _can_view_tasks(auth, session):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
     filters = []
 
     if entity_type:
@@ -36,7 +43,9 @@ async def list_tasks(
         filters.append(Task.created_at >= start_date)
     if end_date:
         filters.append(Task.created_at <= end_date)
-    if assigned_user_id:
+    if auth.role != "admin":
+        filters.append(Task.assigned_user_id == auth.user_id)
+    elif assigned_user_id:
         filters.append(Task.assigned_user_id == assigned_user_id)
     if month:
         # Parse "YYYY-MM" → filter due_date within that month
@@ -73,7 +82,7 @@ async def create_task(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> TaskOut:
-    if not await has_permission(session, auth.user_id, auth, "tasks.manage"):
+    if auth.role != "admin" and not await has_permission(session, auth.user_id, auth, "tasks.manage"):
         raise HTTPException(status_code=403, detail="Permission denied")
     task = Task(**payload.model_dump())
     if not task.assigned_user_id:
@@ -91,7 +100,7 @@ async def update_task(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> TaskOut:
-    if not await has_permission(session, auth.user_id, auth, "tasks.manage"):
+    if auth.role != "admin" and not await has_permission(session, auth.user_id, auth, "tasks.manage"):
         raise HTTPException(status_code=403, detail="Permission denied")
     task = await session.get(Task, task_id)
     if not task:
@@ -109,7 +118,7 @@ async def delete_task(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> None:
-    if not await has_permission(session, auth.user_id, auth, "tasks.manage"):
+    if auth.role != "admin" and not await has_permission(session, auth.user_id, auth, "tasks.manage"):
         raise HTTPException(status_code=403, detail="Permission denied")
     task = await session.get(Task, task_id)
     if not task:

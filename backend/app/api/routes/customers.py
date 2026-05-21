@@ -13,6 +13,10 @@ from app.schemas.common import PaginationMeta
 router = APIRouter()
 
 
+async def _can_view_customers(auth: AuthContext, session: AsyncSession) -> bool:
+    return auth.role == "admin" or await has_permission(session, auth.user_id, auth, "customers.view") or await has_permission(session, auth.user_id, auth, "customers.manage")
+
+
 @router.get("", response_model=CustomerListResponse)
 async def list_customers(
     stage: str | None = None,
@@ -20,11 +24,18 @@ async def list_customers(
     search: str | None = None,
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-    _: AuthContext = Depends(get_current_auth),
+    auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> CustomerListResponse:
+    if not await _can_view_customers(auth, session):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
     query = select(Customer)
     count_query = select(func.count(Customer.id))
+
+    if auth.role != "admin":
+        query = query.where(Customer.assigned_user_id == auth.user_id)
+        count_query = count_query.where(Customer.assigned_user_id == auth.user_id)
 
     if stage:
         query = query.where(Customer.stage == stage)
@@ -73,11 +84,13 @@ async def create_customer(
 @router.get("/{customer_id}", response_model=CustomerOut)
 async def get_customer(
     customer_id: str,
-    _: AuthContext = Depends(get_current_auth),
+    auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> CustomerOut:
     entity = await session.get(Customer, customer_id)
     if not entity:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    if auth.role != "admin" and entity.assigned_user_id != auth.user_id:
         raise HTTPException(status_code=404, detail="Customer not found")
     return CustomerOut.model_validate(entity)
 
@@ -85,11 +98,13 @@ async def get_customer(
 @router.get("/{customer_id}/profile", response_model=CustomerProfileResponse)
 async def get_customer_profile(
     customer_id: str,
-    _: AuthContext = Depends(get_current_auth),
+    auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> CustomerProfileResponse:
     entity = await session.get(Customer, customer_id)
     if not entity:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    if auth.role != "admin" and entity.assigned_user_id != auth.user_id:
         raise HTTPException(status_code=404, detail="Customer not found")
 
     leads = (
@@ -163,7 +178,7 @@ async def update_customer(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> CustomerOut:
-    if not await has_permission(session, auth.user_id, auth, "customers.manage"):
+    if auth.role != "admin" and not await has_permission(session, auth.user_id, auth, "customers.manage"):
         raise HTTPException(status_code=403, detail="Permission denied")
     entity = await session.get(Customer, customer_id)
     if not entity:
@@ -183,7 +198,7 @@ async def delete_customer(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> None:
-    if not await has_permission(session, auth.user_id, auth, "customers.manage"):
+    if auth.role != "admin" and not await has_permission(session, auth.user_id, auth, "customers.manage"):
         raise HTTPException(status_code=403, detail="Permission denied")
     entity = await session.get(Customer, customer_id)
     if not entity:

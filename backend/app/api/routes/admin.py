@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, get_current_auth, get_session_dep, has_permission
 from app.core.config import settings
-from app.db.models import PermissionGrant, Task
+from app.db.models import Lead, PermissionGrant, Task
 
 
 router = APIRouter()
@@ -33,6 +33,7 @@ class AdminUserDetail(BaseModel):
     created_at: str | None = None
     permissions: list[str] = []
     task_count: int = 0
+    lead_count: int = 0
 
 
 class AdminUserListResponse(BaseModel):
@@ -58,7 +59,7 @@ async def create_admin_user(
     auth: AuthContext = Depends(get_current_auth),
     session=Depends(get_session_dep),
 ) -> AdminUserOut:
-    if not await has_permission(session, auth.user_id, auth, "permissions.manage"):
+    if auth.role != "admin" and not await has_permission(session, auth.user_id, auth, "permissions.manage"):
         raise HTTPException(status_code=403, detail="Permission denied")
 
     if not settings.supabase_url or not settings.supabase_service_role_key:
@@ -99,6 +100,8 @@ async def list_admin_users(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> AdminUserListResponse:
+    if auth.role != "admin" and not await has_permission(session, auth.user_id, auth, "permissions.manage"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     """List users from Supabase Auth and enrich with permissions + task counts."""
     # Agents need to view users for lead assignment, no permission required.
 
@@ -151,10 +154,20 @@ async def list_admin_users(
     ).all()
     task_count_map: dict[str, int] = {row.assigned_user_id: row.cnt for row in task_counts if row.assigned_user_id}
 
+    # Get lead counts by assignee, including either direct owner or assigned agent
+    lead_count_map: dict[str, int] = {}
+    all_leads = (await session.execute(select(Lead))).scalars().all()
+    for lead in all_leads:
+        if lead.assigned_user_id:
+            lead_count_map[lead.assigned_user_id] = lead_count_map.get(lead.assigned_user_id, 0) + 1
+        if lead.assigned_agent_id:
+            lead_count_map[lead.assigned_agent_id] = lead_count_map.get(lead.assigned_agent_id, 0) + 1
+
     # Enrich users with permissions + task counts
     for user in users:
         user.permissions = perms_by_user.get(user.id, [])
         user.task_count = task_count_map.get(user.id, 0)
+        user.lead_count = lead_count_map.get(user.id, 0)
 
     # Also include any permission users not returned by Supabase (e.g. dev users)
     known_ids = {u.id for u in users}
@@ -166,6 +179,7 @@ async def list_admin_users(
                 name=p.user_id[:12],
                 permissions=perms_by_user.get(p.user_id, []),
                 task_count=task_count_map.get(p.user_id, 0),
+                lead_count=lead_count_map.get(p.user_id, 0),
             ))
             known_ids.add(p.user_id)
 
@@ -177,6 +191,8 @@ async def permissions_summary(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> list[PermissionsSummaryItem]:
+    if auth.role != "admin" and not await has_permission(session, auth.user_id, auth, "permissions.manage"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     """Return each user and their list of permission grants for the workspace."""
     rows = (
         await session.execute(
@@ -199,6 +215,8 @@ async def tasks_summary(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> list[TasksSummaryItem]:
+    if auth.role != "admin" and not await has_permission(session, auth.user_id, auth, "permissions.manage"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     """Return task counts per assigned user."""
     all_tasks = (await session.execute(select(Task))).scalars().all()
     from collections import defaultdict

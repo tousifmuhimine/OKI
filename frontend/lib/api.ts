@@ -1,7 +1,7 @@
 import { clearAllAuthState, getDevWorkspaceId, isDemoSessionActive } from "@/lib/demo-auth";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
+const API_BASE_URL = "/api/v1";
 
 async function buildHeaders(init?: HeadersInit): Promise<Headers> {
   const headers = new Headers(init);
@@ -32,10 +32,6 @@ async function buildHeaders(init?: HeadersInit): Promise<Headers> {
 }
 
 export async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
-  if (!API_BASE_URL) {
-    throw new Error("Missing NEXT_PUBLIC_API_BASE_URL in frontend/.env.local");
-  }
-
   const headers = await buildHeaders(options.headers);
   let response: Response;
   try {
