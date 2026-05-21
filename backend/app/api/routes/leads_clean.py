@@ -1,4 +1,5 @@
-from datetime import datetime
+from datetime import datetime, timedelta
+import secrets
 
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -6,7 +7,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, get_current_auth, get_session_dep
-from app.db.models import AuditLog, Contact, Conversation, Customer, Inbox, Lead, LeadActivity, LeadArea, LeadProfession, LeadSector, LeadSource, LeadStage, Message, Opportunity, SalesOrder, Task, UserLLMConfig
+from app.db.models import AuditLog, Contact, Conversation, Customer, Inbox, Lead, LeadActivity, LeadArea, LeadProfession, LeadSector, LeadSource, LeadStage, LeadShareLink, Message, Opportunity, Organization, SalesOrder, Task, UserLLMConfig
 from app.inbox.security import decrypt_channel_config
 from app.schemas.common import PaginationMeta
 from app.schemas.customer import CustomerOut
@@ -19,9 +20,12 @@ from app.schemas.lead import (
     LeadCreate,
     LeadListResponse,
     LeadOut,
+    LeadShareCreate,
+    LeadShareOut,
     LeadUpdate,
     LeadTimelineItem,
 )
+from app.core.config import settings
 from app.services.ai_convert import convert_notes_to_lead
 from app.services.intelligence import evaluate_intelligence_alerts, record_preference_history, record_stage_history
 from app.services.lead_capture import upsert_lead_from_inbound_message
@@ -63,6 +67,19 @@ def _normalize_tags(tags: list[str] | None) -> list[str] | None:
         if tag not in seen:
             seen.add(tag)
             unique.append(tag)
+    return unique
+
+
+def _normalize_emails(emails: list[str] | None) -> list[str]:
+    if not emails:
+        return []
+    normalized = [email.strip().lower() for email in emails if isinstance(email, str) and email.strip()]
+    unique: list[str] = []
+    seen = set()
+    for email in normalized:
+        if email not in seen:
+            seen.add(email)
+            unique.append(email)
     return unique
 
 
@@ -439,6 +456,57 @@ async def create_lead_activity(
     await session.commit()
     await session.refresh(activity)
     return LeadActivityOut.model_validate(activity)
+
+
+@router.post("/{lead_id}/share-links", response_model=LeadShareOut, status_code=status.HTTP_201_CREATED)
+async def create_lead_share_link(
+    lead_id: str,
+    payload: LeadShareCreate,
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> LeadShareOut:
+    await _get_lead_or_404(lead_id, session)
+    org = None
+    if auth.org_id:
+        org = await session.get(Organization, auth.org_id)
+
+    if payload.mode == "public" and org and not org.allow_public_shares:
+        raise HTTPException(status_code=403, detail="Public share links are disabled")
+
+    allowed_emails = _normalize_emails(payload.allowed_emails)
+    if payload.mode == "restricted" and not allowed_emails:
+        raise HTTPException(status_code=400, detail="Allowed emails are required for restricted sharing")
+
+    expires_at = None
+    if payload.expires_in_days:
+        expires_at = datetime.utcnow() + timedelta(days=payload.expires_in_days)
+    elif org and org.default_share_expiry_days:
+        expires_at = datetime.utcnow() + timedelta(days=org.default_share_expiry_days)
+
+    token = secrets.token_urlsafe(24)
+    share = LeadShareLink(
+        lead_id=lead_id,
+        created_by_user_id=auth.user_id,
+        token=token,
+        is_public=(payload.mode == "public"),
+        allowed_emails=allowed_emails,
+        expires_at=expires_at,
+    )
+    session.add(share)
+    await session.commit()
+    await session.refresh(share)
+
+    share_url = f"{settings.frontend_origin.rstrip('/')}/share/lead/{share.token}"
+    return LeadShareOut(
+        id=share.id,
+        lead_id=share.lead_id,
+        token=share.token,
+        share_url=share_url,
+        is_public=share.is_public,
+        allowed_emails=share.allowed_emails or [],
+        expires_at=share.expires_at,
+        created_at=share.created_at,
+    )
 
 
 @router.patch("/{lead_id}/activities/{activity_id}", response_model=LeadActivityOut)

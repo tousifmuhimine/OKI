@@ -7,7 +7,7 @@ import {
   Clock, TrendingUp, Info, Users, ChevronDown, Zap,
   Activity, ArrowUpRight, Flame, Circle, ChevronLeft,
   CalendarDays, AlignLeft, MessageCircle, BrainCircuit,
-  HandMetal, ShieldCheck, Wallet,
+  HandMetal, ShieldCheck, Wallet, Tag,
 } from "lucide-react";
 
 import { ProtectedPage } from "@/components/protected-page";
@@ -147,6 +147,12 @@ export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState(0);
   const [notice, setNotice]       = useState(true);
   const [userName, setUserName]   = useState("Ji-ho");
+  const [userRole, setUserRole]   = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [bucketTab, setBucketTab] = useState<"Today" | "This Week" | "This Month">("Today");
+  const [bucketLeads, setBucketLeads] = useState<any[]>([]);
+  const [bucketTasks, setBucketTasks] = useState<any[]>([]);
+  const [loadingBucket, setLoadingBucket] = useState(false);
 
   // Single custom timezone clock
   const [now, setNow] = useState(new Date());
@@ -162,7 +168,13 @@ export default function DashboardPage() {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5);
   }, [data]);
+  const topConvertedTags = useMemo(() => {
+    return Object.entries(data?.converted_tags_breakdown ?? {})
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5);
+  }, [data]);
   const platformAnalytics = useMemo(() => data?.platform_analytics ?? [], [data]);
+  const showAssignedBuckets = Boolean(userRole && userRole !== "admin");
 
   // Calendar State
   const [events, setEvents] = useState<TaskEvent[]>([]);
@@ -189,15 +201,50 @@ export default function DashboardPage() {
     return () => window.clearInterval(t);
   }, []);
 
+
+  useEffect(() => {
+    if (!userId || userRole === "admin") return;
+    let alive = true;
+    async function loadBucket() {
+      setLoadingBucket(true);
+      try {
+        const now = new Date();
+        let start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        if (bucketTab === "This Week") {
+          start.setDate(now.getDate() - now.getDay());
+        } else if (bucketTab === "This Month") {
+          start = new Date(now.getFullYear(), now.getMonth(), 1);
+        }
+        const sd = start.toISOString();
+        
+        const [leadsRes, tasksRes] = await Promise.all([
+          apiRequest("/leads?quick_filter=assigned_to_me&start_date=" + sd + "&sort=desc&limit=20"),
+          apiRequest("/tasks?assigned_user_id=" + userId + "&start_date=" + sd + "&limit=20")
+        ]);
+        if (!alive) return;
+        setBucketLeads((leadsRes as any).data || []);
+        setBucketTasks((tasksRes as any).data || []);
+      } catch (err) {
+        console.error("Failed to load buckets", err);
+      } finally {
+        if (alive) setLoadingBucket(false);
+      }
+    }
+    loadBucket();
+    return () => { alive = false; };
+  }, [bucketTab, userId, userRole]);
+
   useEffect(() => {
     getSupabaseClient().auth.getUser().then(({ data }) => {
       if (data.user) {
         let name = data.user.user_metadata?.name || data.user.email?.split('@')[0] || "Ji-ho";
-        const role = data.user.user_metadata?.role || "agent";
+        const role = data.user.user_metadata?.role || data.user.app_metadata?.role || "agent";
         if (role === "admin") {
           name += " sir";
         }
         setUserName(name);
+        setUserRole(String(role));
+        setUserId(data.user.id);
       }
     });
   }, []);
@@ -448,6 +495,29 @@ export default function DashboardPage() {
             </div>
           </BCard>
 
+          {showAssignedBuckets && (
+            <BCard className="lg:col-span-5 lg:row-span-2" delay="70ms">
+              <CardHead
+                title={<><CheckSquare size={14} className="text-brand-500" /> My assigned leads</>}
+                sub="Newly assigned leads by created date"
+              />
+              <div className="grid gap-3 px-5 py-4">
+                <div className="flex items-center justify-between rounded-2xl border border-white/20 bg-white/30 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+                  <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Daily</span>
+                  <span className="rounded-full bg-brand-500/15 px-3 py-1 text-xs font-bold text-brand-600 dark:text-brand-300">{data?.assigned_leads_daily ?? 0}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-2xl border border-white/20 bg-white/30 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+                  <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Weekly</span>
+                  <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-bold text-emerald-600 dark:text-emerald-300">{data?.assigned_leads_weekly ?? 0}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-2xl border border-white/20 bg-white/30 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+                  <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Monthly</span>
+                  <span className="rounded-full bg-amber-500/15 px-3 py-1 text-xs font-bold text-amber-600 dark:text-amber-300">{data?.assigned_leads_monthly ?? 0}</span>
+                </div>
+              </div>
+            </BCard>
+          )}
+
           {/* ── KPI mini tiles (2×2 grid) ── lg: col 8-12, rows 1-2 */}
           <div className="grid grid-cols-2 gap-4 lg:col-span-5 lg:row-span-2 lg:content-start">
             <KpiTile icon={Target}      label="Goal Completion" value={`${data?.customers ?? 0}%`} trend="+4.2% vs last month" delay="80ms" />
@@ -461,7 +531,7 @@ export default function DashboardPage() {
               title={<><Activity size={14} className="text-brand-500" /> Lead analytics</>}
               sub="Lead volume and conversions by source"
             />
-            <div className="grid gap-4 px-5 py-4 md:grid-cols-2">
+            <div className="grid gap-4 px-5 py-4 md:grid-cols-2 lg:grid-cols-3">
               <div className="rounded-2xl border border-white/30 bg-white/30 p-4 dark:border-white/10 dark:bg-white/5">
                 <div className="mb-3 flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Lead sources</h3>
@@ -499,6 +569,26 @@ export default function DashboardPage() {
                     <div key={source} className="flex items-center justify-between rounded-xl bg-white/35 px-3 py-2 dark:bg-black/20">
                       <span className="capitalize text-sm text-slate-700 dark:text-slate-200">{formatSourceLabel(source)}</span>
                       <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300">{count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/30 bg-white/30 p-4 dark:border-white/10 dark:bg-white/5 md:col-span-2 lg:col-span-1">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Converted tags</h3>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Winning traits</span>
+                </div>
+                <div className="space-y-2">
+                  {topConvertedTags.length === 0 ? (
+                    <p className="text-sm text-slate-500 dark:text-slate-400">No converted tags yet.</p>
+                  ) : topConvertedTags.map(([tag, count]) => (
+                    <div key={tag} className="flex items-center justify-between rounded-xl bg-white/35 px-3 py-2 dark:bg-black/20">
+                      <span className="flex items-center gap-1.5 capitalize text-sm text-slate-700 dark:text-slate-200">
+                        <Tag size={12} className="text-violet-500" />
+                        {tag}
+                      </span>
+                      <span className="rounded-full bg-violet-500/15 px-2.5 py-1 text-xs font-semibold text-violet-700 dark:text-violet-300">{count}</span>
                     </div>
                   ))}
                 </div>

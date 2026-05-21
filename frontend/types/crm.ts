@@ -29,8 +29,12 @@ export type DashboardSummary = {
   payment_status_breakdown: Record<string, number>;
   lead_source_breakdown: Record<string, number>;
   converted_source_breakdown: Record<string, number>;
+  converted_tags_breakdown: Record<string, number>;
   platform_analytics: PlatformChannelAnalytics[];
   intelligence: DashboardIntelligence;
+  assigned_leads_daily: number;
+  assigned_leads_weekly: number;
+  assigned_leads_monthly: number;
 };
 
 export type Customer = {
@@ -201,6 +205,32 @@ export type LeadTimelineItem = {
   created_by_user_id: string | null;
   due_at: string | null;
   completed_at: string | null;
+  created_at: string;
+};
+
+export type LeadShareLink = {
+  id: string;
+  lead_id: string;
+  token: string;
+  share_url: string;
+  is_public: boolean;
+  allowed_emails: string[];
+  expires_at: string | null;
+  created_at: string;
+};
+
+export type PublicLead = {
+  id: string;
+  company_name: string;
+  contact_person: string | null;
+  phone: string | null;
+  email: string | null;
+  status: string;
+  priority: string | null;
+  lead_stage_id: string | null;
+  lead_source_id: string | null;
+  tags: string[] | null;
+  notes: string | null;
   created_at: string;
 };
 

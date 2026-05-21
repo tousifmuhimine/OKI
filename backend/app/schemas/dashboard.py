@@ -33,5 +33,9 @@ class DashboardSummary(BaseModel):
     payment_status_breakdown: dict[str, int]
     lead_source_breakdown: dict[str, int]
     converted_source_breakdown: dict[str, int]
+    converted_tags_breakdown: dict[str, int] = Field(default_factory=dict)
     platform_analytics: list[PlatformChannelAnalytics] = Field(default_factory=list)
     intelligence: DashboardIntelligence = Field(default_factory=DashboardIntelligence)
+    assigned_leads_daily: int = 0
+    assigned_leads_weekly: int = 0
+    assigned_leads_monthly: int = 0
