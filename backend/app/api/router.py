@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.routes import admin, alerts, analytics, customers, dashboard, health, lead_config, orders, opportunities, tasks, permissions
+from app.api.routes import admin, alerts, analytics, customers, dashboard, health, lead_config, orders, opportunities, tasks, permissions, public
 from app.api.routes import leads_clean as leads
 from app.inbox.routers import channels, integrations
 from app.inbox.routers import ai, conversations
@@ -23,3 +23,4 @@ api_router.include_router(conversations.router, prefix="/inbox", tags=["inbox"])
 api_router.include_router(channels.router, prefix="/inbox", tags=["inbox-channels"])
 api_router.include_router(integrations.router, prefix="/integrations", tags=["integrations"])
 api_router.include_router(ai.router, prefix="/ai", tags=["ai"])
+api_router.include_router(public.router, prefix="/public", tags=["public"])

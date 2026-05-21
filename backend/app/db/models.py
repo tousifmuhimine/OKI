@@ -39,6 +39,18 @@ class Customer(Base, TimestampMixin):
     stage: Mapped[str] = mapped_column(String(64), default="new", index=True)
     group_name: Mapped[str] = mapped_column(String(120), nullable=True)
     tags: Mapped[list[str]] = mapped_column(JSONB, default=list)
+
+
+class LeadShareLink(Base, TimestampMixin):
+    __tablename__ = "lead_share_links"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    lead_id: Mapped[str] = mapped_column(String(36), ForeignKey("leads.id", ondelete="CASCADE"), index=True)
+    created_by_user_id: Mapped[str] = mapped_column(String(36), index=True)
+    token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False)
+    allowed_emails: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     score: Mapped[int] = mapped_column(default=0)
     last_contact_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     notes: Mapped[str] = mapped_column(Text, nullable=True)
@@ -443,3 +455,5 @@ class Organization(Base, TimestampMixin):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
     company_name: Mapped[str] = mapped_column(String(255), index=True)
+    allow_public_shares: Mapped[bool] = mapped_column(Boolean, default=True)
+    default_share_expiry_days: Mapped[int | None] = mapped_column(Integer, nullable=True)

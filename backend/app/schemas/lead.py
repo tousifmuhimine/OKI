@@ -1,6 +1,7 @@
 from datetime import datetime
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, EmailStr
+from typing import Literal
 
 from app.schemas.common import PaginationMeta
 
@@ -245,4 +246,36 @@ class LeadTimelineItem(BaseModel):
     created_by_user_id: str | None = None
     due_at: datetime | None = None
     completed_at: datetime | None = None
+    created_at: datetime
+
+
+class LeadShareCreate(BaseModel):
+    mode: Literal["public", "restricted"] = "public"
+    allowed_emails: list[EmailStr] | None = None
+    expires_in_days: int | None = Field(default=None, ge=1, le=3650)
+
+
+class LeadShareOut(BaseModel):
+    id: str
+    lead_id: str
+    token: str
+    share_url: str
+    is_public: bool
+    allowed_emails: list[str]
+    expires_at: datetime | None
+    created_at: datetime
+
+
+class PublicLeadOut(BaseModel):
+    id: str
+    company_name: str
+    contact_person: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    status: str
+    priority: str | None = None
+    lead_stage_id: str | None = None
+    lead_source_id: str | None = None
+    tags: list[str] | None = None
+    notes: str | None = None
     created_at: datetime

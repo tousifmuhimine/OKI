@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,6 +46,48 @@ async def dashboard_summary(
             .group_by(Lead.source)
         )
     ).all()
+
+    converted_leads_tags = (
+        await session.execute(
+            select(Lead.tags).where(Lead.converted_customer_id.is_not(None))
+        )
+    ).scalars().all()
+    converted_tags_breakdown = {}
+    for tags in converted_leads_tags:
+        if isinstance(tags, list):
+            for t in tags:
+                if t:
+                    converted_tags_breakdown[t] = converted_tags_breakdown.get(t, 0) + 1
+
+    now = datetime.utcnow()
+    start_of_day = datetime(now.year, now.month, now.day)
+    start_of_week = start_of_day - timedelta(days=start_of_day.weekday())
+    start_of_month = datetime(now.year, now.month, 1)
+
+    assigned_leads_daily = (
+        await session.execute(
+            select(func.count(Lead.id)).where(
+                Lead.assigned_user_id == auth.user_id,
+                Lead.created_at >= start_of_day,
+            )
+        )
+    ).scalar_one()
+    assigned_leads_weekly = (
+        await session.execute(
+            select(func.count(Lead.id)).where(
+                Lead.assigned_user_id == auth.user_id,
+                Lead.created_at >= start_of_week,
+            )
+        )
+    ).scalar_one()
+    assigned_leads_monthly = (
+        await session.execute(
+            select(func.count(Lead.id)).where(
+                Lead.assigned_user_id == auth.user_id,
+                Lead.created_at >= start_of_month,
+            )
+        )
+    ).scalar_one()
 
     platform_analytics: list[PlatformChannelAnalytics] = []
     for channel in ("facebook", "instagram", "whatsapp", "email", "website", "api"):
@@ -200,6 +244,10 @@ async def dashboard_summary(
         payment_status_breakdown={row[0]: row[1] for row in payment_rows},
         lead_source_breakdown={row[0] or "unsourced": row[1] for row in lead_source_rows},
         converted_source_breakdown={row[0] or "unsourced": row[1] for row in converted_source_rows},
+        converted_tags_breakdown=converted_tags_breakdown,
         platform_analytics=platform_analytics,
         intelligence=intelligence,
+        assigned_leads_daily=assigned_leads_daily,
+        assigned_leads_weekly=assigned_leads_weekly,
+        assigned_leads_monthly=assigned_leads_monthly,
     )

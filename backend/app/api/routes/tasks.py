@@ -18,6 +18,9 @@ async def list_tasks(
     entity_type: str | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
     month: str | None = Query(default=None, description="YYYY-MM — filter by due_date month"),
+    start_date: datetime | None = Query(default=None),
+    end_date: datetime | None = Query(default=None),
+    assigned_user_id: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     _: AuthContext = Depends(get_current_auth),
@@ -29,6 +32,12 @@ async def list_tasks(
         filters.append(Task.entity_type == entity_type)
     if status_filter:
         filters.append(Task.status == status_filter)
+    if start_date:
+        filters.append(Task.created_at >= start_date)
+    if end_date:
+        filters.append(Task.created_at <= end_date)
+    if assigned_user_id:
+        filters.append(Task.assigned_user_id == assigned_user_id)
     if month:
         # Parse "YYYY-MM" → filter due_date within that month
         try:

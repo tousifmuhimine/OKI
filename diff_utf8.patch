@@ -1,0 +1,946 @@
+﻿diff --git a/frontend/app/leads/page.tsx b/frontend/app/leads/page.tsx
+index 8f084f5..005770a 100644
+--- a/frontend/app/leads/page.tsx
++++ b/frontend/app/leads/page.tsx
+@@ -165,7 +165,7 @@ export default function LeadsPage() {
+   const [leadStageId, setLeadStageId] = useState("");
+   const [leadAreaId, setLeadAreaId] = useState("");
+   const [leadProfessionId, setLeadProfessionId] = useState("");
+-  const [leadPriority, setLeadPriority] = useState("medium");
++  const [leadPriority, setLeadPriority] = useState("");
+   const [leadTags, setLeadTags] = useState<string[]>([]);
+   const [tagInput, setTagInput] = useState("");
+   const [rawNotes, setRawNotes] = useState("");
+@@ -173,11 +173,28 @@ export default function LeadsPage() {
+   const [error, setError] = useState<string | null>(null);
+   const [loading, setLoading] = useState(false);
+   const [savingId, setSavingId] = useState<string | null>(null);
+-  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
++
+   const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
+   // Industry-specific data extracted by AI or entered manually
+   const [industryData, setIndustryData] = useState<Record<string, unknown> | null>(null);
+   const [leadSidebarTab, setLeadSidebarTab] = useState<"details" | "activity" | "edit">("details");
++
++  const [createLeadOpen, setCreateLeadOpen] = useState(false);
++  const [shareLeadId, setShareLeadId] = useState<string | null>(null);
++  const [shareLink, setShareLink] = useState<string | null>(null);
++  const [shareError, setShareError] = useState<string | null>(null);
++  const [extraInfoMenuOpen, setExtraInfoMenuOpen] = useState(false);
++  const [extraInfoValues, setExtraInfoValues] = useState<Record<string, string>>({});
++  
++  const additionalInfoOptions = [
++    { key: "website", label: "Website" },
++    { key: "linkedin", label: "LinkedIn" },
++    { key: "facebook", label: "Facebook" },
++    { key: "twitter", label: "Twitter" },
++    { key: "instagram", label: "Instagram" },
++    { key: "youtube", label: "YouTube" },
++    { key: "address", label: "Address" },
++  ];
+   const [quickFilter, setQuickFilter] = useState("all");
+   const [configs, setConfigs] = useState<LeadConfigs>({ sources: [], stages: [], sectors: [], areas: [], professions: [] });
+   const [activities, setActivities] = useState<LeadTimelineItem[]>([]);
+@@ -311,7 +328,7 @@ export default function LeadsPage() {
+       setAnalytics(summaryResponse);
+       setSelectedId((current) => current && leadResponse.data.some((lead) => lead.id === current)
+         ? current
+-        : leadResponse.data[0]?.id ?? null);
++        : null);
+       setError(null);
+     } catch (err) {
+       setError((err as Error).message);
+@@ -330,7 +347,7 @@ export default function LeadsPage() {
+       ]);
+       setConfigs({ sources, stages, sectors, areas, professions });
+       setUsers(usersRes.data);
+-      setLeadStageId((current) => current || stages[0]?.id || "");
++
+     } catch (err) {
+       setError((err as Error).message);
+     }
+@@ -375,27 +392,7 @@ export default function LeadsPage() {
+     }
+   }, [selectedLead?.id, selectedLead?.ai_instructions, leadSidebarTab]);
+ 
+-  useEffect(() => {
+-    const media = window.matchMedia("(min-width: 1024px)");
+-    function syncDetail(event: MediaQueryList | MediaQueryListEvent) {
+-      if ("matches" in event && event.matches) {
+-        setMobileDetailOpen(false);
+-      }
+-    }
+ 
+-    syncDetail(media);
+-    media.addEventListener("change", syncDetail);
+-    return () => media.removeEventListener("change", syncDetail);
+-  }, []);
+-
+-  useEffect(() => {
+-    if (!mobileDetailOpen) return;
+-    const previousOverflow = document.body.style.overflow;
+-    document.body.style.overflow = "hidden";
+-    return () => {
+-      document.body.style.overflow = previousOverflow;
+-    };
+-  }, [mobileDetailOpen]);
+ 
+   const filteredLeads = useMemo(() => {
+     return leads;
+@@ -516,7 +513,7 @@ export default function LeadsPage() {
+       setLeadSourceId("");
+       setLeadAreaId("");
+       setLeadProfessionId("");
+-      setLeadPriority("medium");
++      setLeadPriority("");
+       setLeadTags([]);
+       setTagInput("");
+       setIndustryData(null);
+@@ -639,9 +636,6 @@ export default function LeadsPage() {
+ 
+   function openLead(leadId: string) {
+     setSelectedId(leadId);
+-    if (window.matchMedia("(max-width: 1023px)").matches) {
+-      setMobileDetailOpen(true);
+-    }
+   }
+ 
+   function renderLeadDetail(overlay = false) {
+@@ -651,22 +645,10 @@ export default function LeadsPage() {
+           Add or select a lead to manage qualification.
+         </div>
+       );
+-    }
+-
+     return (
+       <div>
+         <div className="flex items-start justify-between gap-3">
+           <div className="min-w-0">
+-            {overlay ? (
+-              <button
+-                type="button"
+-                onClick={() => setMobileDetailOpen(false)}
+-                className="mb-3 flex h-10 items-center gap-2 rounded-xl px-2 text-sm font-semibold text-slate-600 transition hover:bg-white/60 dark:text-slate-300 dark:hover:bg-white/10 lg:hidden"
+-              >
+-                <ArrowLeft size={16} />
+-                Back
+-              </button>
+-            ) : null}
+             <p className="text-xs font-semibold uppercase tracking-widest text-brand-500">Lead profile</p>
+             <h2 className="mt-1 truncate text-xl font-bold text-slate-900 dark:text-white">{selectedLead.company_name}</h2>
+             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{selectedLead.contact_person ?? "No contact person"}</p>
+@@ -683,24 +665,18 @@ export default function LeadsPage() {
+           </div>
+         </div>
+ 
+-        {/* Dynamic Sidebar Navigation Tabs */}
+-        <div className="mt-4 flex w-full border-b border-white/20 dark:border-white/10">
+-          {(["details", "activity", ...(currentUser?.role === "admin" ? ["edit"] : [])] as ("details" | "activity" | "edit")[]).map((tab) => (
+-            <button
+-              key={tab}
+-              onClick={() => setLeadSidebarTab(tab)}
+-              className={`flex-1 pb-2 text-xs font-bold uppercase tracking-widest transition-colors ${
+-                leadSidebarTab === tab
+-                  ? "border-b-2 border-brand-500 text-brand-600 dark:text-brand-400"
+-                  : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+-              }`}
+-            >
+-              {tab}
+-            </button>
+-          ))}
++        {/* Share Button */}
++        <div className="mt-4 flex gap-2">
++           <button onClick={() => { setShareLeadId(selectedLead.id); setShareLink(null); setShareError(null); }} className="flex-1 flex justify-center items-center gap-2 rounded-xl bg-indigo-500/10 px-4 py-2 text-xs font-bold text-indigo-600 hover:bg-indigo-500/20 dark:text-indigo-400">
++             <Globe size={14} /> Share Lead
++           </button>
++           {currentUser?.role === "admin" && (
++             <button onClick={() => setBudgetModalLeadId(selectedLead.id)} className="flex-1 flex justify-center items-center gap-2 rounded-xl bg-emerald-500/10 px-4 py-2 text-xs font-bold text-emerald-600 hover:bg-emerald-500/20 dark:text-emerald-400">
++               <CheckCircle2 size={14} /> Convert
++             </button>
++           )}
+         </div>
+ 
+-        {leadSidebarTab === "details" && (
+           <div className="animate-fade-in">
+             <dl className="mt-5 grid gap-3 text-sm">
+               <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+@@ -759,48 +735,259 @@ export default function LeadsPage() {
+               </div>
+             </dl>
+ 
+-            <div className="mt-4 rounded-xl border border-brand-200/40 bg-brand-50/60 p-3 dark:border-brand-500/20 dark:bg-brand-500/10">
+-              <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-brand-600 dark:text-brand-400">
+-                <Sparkles size={12} />
+-                Lead signals
+-              </p>
+-              <div className="flex flex-wrap gap-2 text-[11px] font-semibold">
+-                <span className="rounded-lg bg-white/80 px-2.5 py-1 text-slate-700 dark:bg-white/10 dark:text-slate-200">
+-                  Intent: {compactSignal(selectedLead.intent, "Unknown")}
+-                </span>
+-                <span className="rounded-lg bg-white/80 px-2.5 py-1 text-slate-700 dark:bg-white/10 dark:text-slate-200">
+-                  Engagement: {compactSignal(selectedLead.engagement, "Unknown")}
+-                </span>
+-                <span className="rounded-lg bg-white/80 px-2.5 py-1 text-slate-700 dark:bg-white/10 dark:text-slate-200">
+-                  Trust: {compactSignal(selectedLead.trust_level, "Unknown")}
+-                </span>
+-                {selectedLead.last_summary ? (
+-                  <span className="rounded-lg bg-white/80 px-2.5 py-1 text-slate-700 dark:bg-white/10 dark:text-slate-200">
+-                    Summary: {selectedLead.last_summary}
+-                  </span>
+-                ) : null}
+-              </div>
++            <details className="group mt-6 rounded-xl border border-white/20 bg-white/50 dark:border-white/10 dark:bg-white/5 overflow-hidden">
++            <summary className="cursor-pointer list-none flex items-center justify-between p-4 font-semibold text-slate-800 dark:text-slate-200 hover:bg-white/40 dark:hover:bg-white/10 transition">
++              <span className="flex items-center gap-2"><Briefcase size={16} className="text-brand-500" /> Industry Profile</span>
++              <ChevronDown size={16} className="text-slate-500 transition-transform group-open:rotate-180" />
++            </summary>
++            <div className="p-4 border-t border-white/20 dark:border-white/10 bg-white/20 dark:bg-black/10">
++              {Object.keys(selectedLead.industry_data ?? {}).length === 0 ? (
++                <p className="text-sm text-slate-500">No industry-specific data available.</p>
++              ) : (
++                <dl className="grid gap-3 sm:grid-cols-2 text-sm">
++                  {Object.entries(selectedLead.industry_data ?? {}).map(([key, value]) => (
++                    <div key={key} className="rounded-xl bg-white/50 p-3 dark:bg-black/20">
++                      <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">{key.replace(/_/g, " ")}</dt>
++                      <dd className="mt-1 font-medium text-slate-900 dark:text-white">{String(value)}</dd>
++                    </div>
++                  ))}
++                </dl>
++              )}
+             </div>
+-
+-            {/* Industry-specific data panel */}
+-            {selectedLead.industry_data && Object.keys(selectedLead.industry_data).length > 0 && (
+-              <div className="mt-4 rounded-xl border border-brand-200/40 bg-brand-50/60 p-3 dark:border-brand-500/20 dark:bg-brand-500/10">
+-                <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-brand-600 dark:text-brand-400">
+-                  <Sparkles size={12} />
+-                  Industry Profile
+-                </p>
+-                <dl className="grid gap-2">
+-                  {Object.entries(selectedLead.industry_data).map(([key, value]) =>
+-                    value !== null && value !== undefined && String(value).trim() !== "" ? (
+-                      <div key={key} className="flex items-start justify-between gap-2 text-xs">
+-                        <dt className="capitalize text-slate-500 dark:text-slate-400">{key.replace(/_/g, " ")}</dt>
+-                        <dd className="font-semibold text-right text-slate-800 dark:text-slate-100">{String(value)}</dd>
++          </details>
++
++          <details className="group mt-4 rounded-xl border border-white/20 bg-white/50 dark:border-white/10 dark:bg-white/5 overflow-hidden">
++            <summary className="cursor-pointer list-none flex items-center justify-between p-4 font-semibold text-slate-800 dark:text-slate-200 hover:bg-white/40 dark:hover:bg-white/10 transition">
++              <span className="flex items-center gap-2"><Activity size={16} className="text-indigo-500" /> Activity Timeline</span>
++              <ChevronDown size={16} className="text-slate-500 transition-transform group-open:rotate-180" />
++            </summary>
++            <div className="p-4 border-t border-white/20 dark:border-white/10 bg-white/20 dark:bg-black/10">
++              <div className="animate-fade-in mt-2 space-y-4">
++                <p className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3">Conversation History</p>
++                <div className="relative pl-3 border-l-2 border-white/20 dark:border-white/10 space-y-6">
++                  {activityLoading ? (
++                    <div className="py-4 text-xs font-semibold text-slate-500">
++                      <Loader2 size={14} className="mr-2 inline animate-spin" />
++                      Loading timeline
++                    </div>
++                  ) : activities.length ? (
++                    activities.map((activity) => (
++                      <div className="relative" key={activity.id}>
++                        <div className={`absolute -left-[19px] top-1 h-3 w-3 rounded-full ring-4 ring-white dark:ring-slate-900 ${activity.item_type === "message" ? "bg-emerald-500" : "bg-brand-500"}`} />
++                        <p className="text-[10px] font-bold text-slate-400">{formatDate(activity.created_at)}</p>
++                        <p className="mt-1 text-sm font-semibold capitalize text-slate-800 dark:text-slate-100">
++                          {(activity.title || activity.activity_type || activity.item_type).replace(/_/g, " ")}
++                        </p>
++                        <div className="mt-2 rounded-xl bg-white/50 p-3 text-xs text-slate-600 dark:bg-white/5 dark:text-slate-300">
++                          <span className="mr-2 font-bold text-brand-600 dark:text-brand-400">
++                            {activity.platform || activity.direction || "Activity"}:
++                          </span>
++                          {activity.content || "No notes recorded."}
++                          {activity.due_at ? (
++                            <p className="mt-2 font-semibold text-amber-600 dark:text-amber-300">Due {formatDate(activity.due_at)}</p>
++                          ) : null}
++                        </div>
+                       </div>
+-                    ) : null
++                    ))
++                  ) : (
++                    <div className="relative">
++                      <div className="absolute -left-[19px] top-1 h-3 w-3 rounded-full bg-slate-300 ring-4 ring-white dark:bg-slate-700 dark:ring-slate-900" />
++                      <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">No activity yet</p>
++                    </div>
+                   )}
+-                </dl>
++                </div>
++                 
++                <div className="mt-8">
++                  <div className="mb-2 grid grid-cols-2 gap-2">
++                    <ThemedSelect
++                      value={activityPlatform}
++                      onChange={setActivityPlatform}
++                      icon={MessageSquare}
++                      placeholder="Platform"
++                      options={[
++                        { value: "phone", label: "Phone" },
++                        { value: "whatsapp", label: "WhatsApp" },
++                        { value: "messenger", label: "Messenger" },
++                        { value: "website", label: "Web Widget" },
++                      ]}
++                    />
++                    <input
++                      type="date"
++                      value={followUpDate}
++                      onChange={(event) => setFollowUpDate(event.target.value)}
++                      className="h-11 rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-700 outline-none dark:border-white/10 dark:bg-black/20 dark:text-slate-200"
++                    />
++                  </div>
++                  <textarea 
++                    value={activityNote}
++                    onChange={(event) => setActivityNote(event.target.value)}
++                    className="w-full rounded-xl border border-white/50 bg-white/50 p-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
++                    placeholder="Type a new message or log a call..."
++                    rows={3}
++                  />
++                  <div className="mt-2 flex gap-2">
++                    <button type="button" onClick={() => void createLeadActivity("call")} disabled={!activityNote.trim()} className="flex-1 rounded-xl bg-brand-600 py-2.5 text-xs font-bold text-white transition hover:bg-brand-500 disabled:opacity-50">Log Call</button>
++                    <button type="button" onClick={() => void createLeadActivity("message")} disabled={!activityNote.trim()} className="flex-1 rounded-xl bg-indigo-600 py-2.5 text-xs font-bold text-white transition hover:bg-indigo-500 disabled:opacity-50">Save Message</button>
++                    <button type="button" onClick={() => void createLeadActivity("follow_up")} disabled={!activityNote.trim() || !followUpDate} className="flex-1 rounded-xl bg-amber-500 py-2.5 text-xs font-bold text-white transition hover:bg-amber-600 disabled:opacity-50">Follow-up</button>
++                  </div>
++                </div>
+               </div>
+-            )}
++            </div>
++          </details>
++
++          <details className="group mt-4 rounded-xl border border-white/20 bg-white/50 dark:border-white/10 dark:bg-white/5 overflow-hidden">
++            <summary className="cursor-pointer list-none flex items-center justify-between p-4 font-semibold text-slate-800 dark:text-slate-200 hover:bg-white/40 dark:hover:bg-white/10 transition">
++              <span className="flex items-center gap-2"><Edit size={16} className="text-emerald-500" /> Edit Lead</span>
++              <ChevronDown size={16} className="text-slate-500 transition-transform group-open:rotate-180" />
++            </summary>
++            <div className="p-4 border-t border-white/20 dark:border-white/10 bg-white/20 dark:bg-black/10">
++              <form
++                className="space-y-3"
++                onSubmit={(event) => {
++                  event.preventDefault();
++                  const form = new FormData(event.currentTarget);
++                  const stageId = String(form.get("lead_stage_id") || "");
++                  void updateLead(selectedLead.id, {
++                    company_name: String(form.get("company_name") || selectedLead.company_name),
++                    contact_person: String(form.get("contact_person") || "") || null,
++                    phone: String(form.get("phone") || "") || null,
++                    email: String(form.get("email") || "") || null,
++                    priority: String(form.get("priority") || "medium"),
++                    lead_stage_id: stageId || null,
++                    lead_area_id: String(form.get("lead_area_id") || "") || null,
++                    lead_profession_id: String(form.get("lead_profession_id") || "") || null,
++                    assigned_user_id: String(form.get("assigned_user_id") || "") || null,
++                    tags: editTags,
++                    ai_instructions: aiInstructions || null,
++                    status: configs.stages.find((stage) => stage.id === stageId)?.name.toLowerCase().replace(/\s+/g, "_") || selectedLead.status,
++                  });
++                }}
++              >
++                <label className="block">
++                  <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Company Name</span>
++                  <input name="company_name" defaultValue={selectedLead.company_name} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
++                </label>
++                <label className="block">
++                  <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Contact Person</span>
++                  <input name="contact_person" defaultValue={selectedLead.contact_person ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
++                </label>
++                <label className="block">
++                  <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Phone</span>
++                  <input name="phone" defaultValue={selectedLead.phone ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
++                </label>
++                <label className="block">
++                  <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Email</span>
++                  <input name="email" defaultValue={selectedLead.email ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
++                </label>
++                <div className="grid grid-cols-2 gap-2">
++                  <label className="block">
++                    <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Priority</span>
++                    <UncontrolledThemedSelect
++                      name="priority"
++                      defaultValue={selectedLead.priority ?? "medium"}
++                      placeholder="Priority"
++                      icon={Zap}
++                      options={[
++                        { value: "high", label: "High" },
++                        { value: "medium", label: "Medium" },
++                        { value: "low", label: "Low" },
++                      ]}
++                    />
++                  </label>
++                  <label className="block">
++                    <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Stage</span>
++                    <UncontrolledThemedSelect
++                      name="lead_stage_id"
++                      defaultValue={selectedLead.lead_stage_id ?? ""}
++                      placeholder="Stage"
++                      icon={Filter}
++                      options={[{ value: "", label: "No Stage" }, ...configs.stages.map((stage) => ({ value: stage.id, label: stage.name }))]}
++                    />
++                  </label>
++                </div>
++                <div className="grid grid-cols-2 gap-2">
++                  <label className="block">
++                    <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Area</span>
++                    <UncontrolledThemedSelect
++                      name="lead_area_id"
++                      defaultValue={selectedLead.lead_area_id ?? ""}
++                      placeholder="Area"
++                      icon={Globe}
++                      options={[{ value: "", label: "No Area" }, ...configs.areas.map((area) => ({ value: area.id, label: area.name }))]}
++                    />
++                  </label>
++                  <label className="block">
++                    <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Profession</span>
++                    <UncontrolledThemedSelect
++                      name="lead_profession_id"
++                      defaultValue={selectedLead.lead_profession_id ?? ""}
++                      placeholder="Profession"
++                      icon={User}
++                      options={[{ value: "", label: "No Profession" }, ...configs.professions.map((profession) => ({ value: profession.id, label: profession.name }))]}
++                    />
++                  </label>
++                </div>
++                <label className="block">
++                  <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Assigned To</span>
++                  <UncontrolledThemedSelect
++                    name="assigned_user_id"
++                    defaultValue={selectedLead.assigned_user_id ?? ""}
++                    placeholder="Unassigned"
++                    icon={User}
++                    options={[{ value: "", label: "Unassigned" }, ...users.map((u) => ({ value: u.id, label: u.name || u.email || u.id }))]}
++                  />
++                </label>
++                <div className="rounded-2xl border border-white/20 bg-white/30 p-4 dark:border-white/10 dark:bg-white/5">
++                  <div className="mb-2 flex items-center justify-between">
++                    <span className="text-[11px] font-bold uppercase text-slate-500">Tags</span>
++                    <span className="text-[10px] text-slate-400">Press Enter or comma to add</span>
++                  </div>
++                  <input
++                    value={editTagInput}
++                    onChange={(event) => setEditTagInput(event.target.value)}
++                    onKeyDown={(event) => {
++                      if (event.key === "Enter" || event.key === ",") {
++                        event.preventDefault();
++                        addEditTags(editTagInput);
++                        setEditTagInput("");
++                      }
++                    }}
++                    className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
++                    placeholder="vip, hot, follow-up"
++                  />
++                  <div className="mt-3 flex flex-wrap gap-2">
++                    {editTags.length ? (
++                      editTags.map((tag) => (
++                        <button
++                          key={tag}
++                          type="button"
++                          onClick={() => setEditTags((current) => current.filter((item) => item !== tag))}
++                          className="flex items-center gap-1 rounded-full bg-brand-500/10 px-3 py-1 text-[11px] font-semibold text-brand-600 transition hover:bg-brand-500/20 dark:text-brand-300"
++                        >
++                          {tagLabel(tag)}
++                          <X size={12} />
++                        </button>
++                      ))
++                    ) : (
++                      <span className="text-xs text-slate-400">No tags yet</span>
++                    )}
++                  </div>
++                </div>
++                <label className="block">
++                  <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">AI Instructions</span>
++                  <textarea value={aiInstructions} onChange={(event) => setAiInstructions(event.target.value)} rows={4} className="w-full rounded-xl border border-white/50 bg-white/50 px-3 py-2 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
++                </label>
++                <div className="flex gap-2">
++                  <button type="submit" disabled={savingId === selectedLead.id} className="flex-1 rounded-xl bg-brand-600 py-2.5 text-sm font-bold text-white shadow-glow transition hover:bg-brand-500 disabled:opacity-60">
++                    Save Changes
++                  </button>
++                  <button type="button" onClick={() => deleteLead(selectedLead.id)} className="h-11 rounded-xl bg-rose-500/10 px-4 text-sm font-semibold text-rose-600 hover:bg-rose-500/20 dark:text-rose-400">
++                    Delete
++                  </button>
++                </div>
++              </form>
++            </div>
++          </details>
+ 
+             {/* Raw note audit trail */}
+             {selectedLead.raw_note && (
+@@ -843,265 +1030,30 @@ export default function LeadsPage() {
+                 {savingId === selectedLead.id ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
+                 {selectedLead.converted_customer_id ? "Converted Γ£ô" : "Convert to Customer"}
+               </button>
+-              <button
+-                type="button"
+-                className="flex h-11 items-center justify-center gap-2 rounded-xl bg-white/45 text-sm font-semibold text-slate-700 transition hover:bg-white/70 dark:bg-white/10 dark:text-slate-200 dark:hover:bg-white/15"
+-                title="The current lead table has no dedicated email field yet."
+-              >
+-                <Mail size={16} />
+-                Email follow-up
+-              </button>
+             </div>
+           </div>
+-        )}
+-
+-        {leadSidebarTab === "activity" && (
+-          <div className="animate-fade-in mt-5 space-y-4">
+-            <p className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3">Conversation History</p>
+-            <div className="relative pl-3 border-l-2 border-white/20 dark:border-white/10 space-y-6">
+-              {activityLoading ? (
+-                <div className="py-4 text-xs font-semibold text-slate-500">
+-                  <Loader2 size={14} className="mr-2 inline animate-spin" />
+-                  Loading timeline
+-                </div>
+-              ) : activities.length ? (
+-                activities.map((activity) => (
+-                  <div className="relative" key={activity.id}>
+-                    <div className={`absolute -left-[19px] top-1 h-3 w-3 rounded-full ring-4 ring-white dark:ring-slate-900 ${activity.item_type === "message" ? "bg-emerald-500" : "bg-brand-500"}`} />
+-                    <p className="text-[10px] font-bold text-slate-400">{formatDate(activity.created_at)}</p>
+-                    <p className="mt-1 text-sm font-semibold capitalize text-slate-800 dark:text-slate-100">
+-                      {(activity.title || activity.activity_type || activity.item_type).replace(/_/g, " ")}
+-                    </p>
+-                    <div className="mt-2 rounded-xl bg-white/50 p-3 text-xs text-slate-600 dark:bg-white/5 dark:text-slate-300">
+-                      <span className="mr-2 font-bold text-brand-600 dark:text-brand-400">
+-                        {activity.platform || activity.direction || "Activity"}:
+-                      </span>
+-                      {activity.content || "No notes recorded."}
+-                      {activity.due_at ? (
+-                        <p className="mt-2 font-semibold text-amber-600 dark:text-amber-300">Due {formatDate(activity.due_at)}</p>
+-                      ) : null}
+-                    </div>
+-                  </div>
+-                ))
+-              ) : (
+-                <div className="relative">
+-                  <div className="absolute -left-[19px] top-1 h-3 w-3 rounded-full bg-slate-300 ring-4 ring-white dark:bg-slate-700 dark:ring-slate-900" />
+-                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">No activity yet</p>
+-                  <div className="mt-2 rounded-xl bg-white/50 p-3 text-xs text-slate-600 dark:bg-white/5 dark:text-slate-300">
+-                    Log the first call, message, or follow-up for this lead.
+-                  </div>
+-                </div>
+-              )}
+-            </div>
+-             
+-            <div className="mt-8">
+-              <div className="mb-2 grid grid-cols-2 gap-2">
+-                <ThemedSelect
+-                  value={activityPlatform}
+-                  onChange={setActivityPlatform}
+-                  icon={MessageSquare}
+-                  placeholder="Platform"
+-                  options={[
+-                    { value: "phone", label: "Phone" },
+-                    { value: "whatsapp", label: "WhatsApp" },
+-                    { value: "messenger", label: "Messenger" },
+-                    { value: "website", label: "Web Widget" },
+-                  ]}
+-                />
+-                <input
+-                  type="date"
+-                  value={followUpDate}
+-                  onChange={(event) => setFollowUpDate(event.target.value)}
+-                  className="h-11 rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-700 outline-none dark:border-white/10 dark:bg-black/20 dark:text-slate-200"
+-                />
+-              </div>
+-              <textarea 
+-                value={activityNote}
+-                onChange={(event) => setActivityNote(event.target.value)}
+-                className="w-full rounded-xl border border-white/50 bg-white/50 p-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+-                placeholder="Type a new message or log a call..."
+-                rows={3}
+-              />
+-              <div className="mt-2 flex gap-2">
+-                <button type="button" onClick={() => void createLeadActivity("call")} disabled={!activityNote.trim()} className="flex-1 rounded-xl bg-brand-600 py-2.5 text-xs font-bold text-white transition hover:bg-brand-500 disabled:opacity-50">Log Call</button>
+-                <button type="button" onClick={() => void createLeadActivity("message")} disabled={!activityNote.trim()} className="flex-1 rounded-xl bg-indigo-600 py-2.5 text-xs font-bold text-white transition hover:bg-indigo-500 disabled:opacity-50">Save Message</button>
+-                <button type="button" onClick={() => void createLeadActivity("follow_up")} disabled={!activityNote.trim() || !followUpDate} className="flex-1 rounded-xl bg-amber-500 py-2.5 text-xs font-bold text-white transition hover:bg-amber-600 disabled:opacity-50">Follow-up</button>
+-              </div>
+-            </div>
+-          </div>
+-        )}
+-
+-        {leadSidebarTab === "edit" && (
+-          <div className="animate-fade-in mt-5 space-y-4">
+-            <p className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3">Edit Lead Information</p>
+-            <form
+-              className="space-y-3"
+-              onSubmit={(event) => {
+-                event.preventDefault();
+-                const form = new FormData(event.currentTarget);
+-                const stageId = String(form.get("lead_stage_id") || "");
+-                void updateLead(selectedLead.id, {
+-                  company_name: String(form.get("company_name") || selectedLead.company_name),
+-                  contact_person: String(form.get("contact_person") || "") || null,
+-                  phone: String(form.get("phone") || "") || null,
+-                  email: String(form.get("email") || "") || null,
+-                  priority: String(form.get("priority") || "medium"),
+-                  lead_stage_id: stageId || null,
+-                  lead_area_id: String(form.get("lead_area_id") || "") || null,
+-                  lead_profession_id: String(form.get("lead_profession_id") || "") || null,
+-                  assigned_user_id: String(form.get("assigned_user_id") || "") || null,
+-                  tags: editTags,
+-                  ai_instructions: aiInstructions || null,
+-                  status: configs.stages.find((stage) => stage.id === stageId)?.name.toLowerCase().replace(/\s+/g, "_") || selectedLead.status,
+-                });
+-              }}
+-            >
+-              <label className="block">
+-                <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Company Name</span>
+-                <input name="company_name" defaultValue={selectedLead.company_name} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+-              </label>
+-              <label className="block">
+-                <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Contact Person</span>
+-                <input name="contact_person" defaultValue={selectedLead.contact_person ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+-              </label>
+-              <label className="block">
+-                <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Phone</span>
+-                <input name="phone" defaultValue={selectedLead.phone ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+-              </label>
+-              <label className="block">
+-                <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Email</span>
+-                <input name="email" defaultValue={selectedLead.email ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+-              </label>
+-              <div className="grid grid-cols-2 gap-2">
+-                <label className="block">
+-                  <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Priority</span>
+-                  <UncontrolledThemedSelect
+-                    name="priority"
+-                    defaultValue={selectedLead.priority ?? "medium"}
+-                    placeholder="Priority"
+-                    icon={Zap}
+-                    options={[
+-                      { value: "high", label: "High" },
+-                      { value: "medium", label: "Medium" },
+-                      { value: "low", label: "Low" },
+-                    ]}
+-                  />
+-                </label>
+-                <label className="block">
+-                  <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Stage</span>
+-                  <UncontrolledThemedSelect
+-                    name="lead_stage_id"
+-                    defaultValue={selectedLead.lead_stage_id ?? ""}
+-                    placeholder="Stage"
+-                    icon={Filter}
+-                    options={[{ value: "", label: "No Stage" }, ...configs.stages.map((stage) => ({ value: stage.id, label: stage.name }))]}
+-                  />
+-                </label>
+-              </div>
+-              <div className="grid grid-cols-2 gap-2">
+-                <label className="block">
+-                  <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Area</span>
+-                  <UncontrolledThemedSelect
+-                    name="lead_area_id"
+-                    defaultValue={selectedLead.lead_area_id ?? ""}
+-                    placeholder="Area"
+-                    icon={Globe}
+-                    options={[{ value: "", label: "No Area" }, ...configs.areas.map((area) => ({ value: area.id, label: area.name }))]}
+-                  />
+-                </label>
+-                <label className="block">
+-                  <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Profession</span>
+-                  <UncontrolledThemedSelect
+-                    name="lead_profession_id"
+-                    defaultValue={selectedLead.lead_profession_id ?? ""}
+-                    placeholder="Profession"
+-                    icon={User}
+-                    options={[{ value: "", label: "No Profession" }, ...configs.professions.map((profession) => ({ value: profession.id, label: profession.name }))]}
+-                  />
+-                </label>
+-              </div>
+-              <label className="block">
+-                <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Assigned To</span>
+-                <UncontrolledThemedSelect
+-                  name="assigned_user_id"
+-                  defaultValue={selectedLead.assigned_user_id ?? ""}
+-                  placeholder="Unassigned"
+-                  icon={User}
+-                  options={[{ value: "", label: "Unassigned" }, ...users.map((u) => ({ value: u.id, label: u.name || u.email || u.id }))]}
+-                />
+-              </label>
+-              <div className="rounded-2xl border border-white/20 bg-white/30 p-4 dark:border-white/10 dark:bg-white/5">
+-                <div className="mb-2 flex items-center justify-between">
+-                  <span className="text-[11px] font-bold uppercase text-slate-500">Tags</span>
+-                  <span className="text-[10px] text-slate-400">Press Enter or comma to add</span>
+-                </div>
+-                <input
+-                  value={editTagInput}
+-                  onChange={(event) => setEditTagInput(event.target.value)}
+-                  onKeyDown={(event) => {
+-                    if (event.key === "Enter" || event.key === ",") {
+-                      event.preventDefault();
+-                      addEditTags(editTagInput);
+-                      setEditTagInput("");
+-                    }
+-                  }}
+-                  className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+-                  placeholder="vip, hot, follow-up"
+-                />
+-                <div className="mt-3 flex flex-wrap gap-2">
+-                  {editTags.length ? (
+-                    editTags.map((tag) => (
+-                      <button
+-                        key={tag}
+-                        type="button"
+-                        onClick={() => setEditTags((current) => current.filter((item) => item !== tag))}
+-                        className="flex items-center gap-1 rounded-full bg-brand-500/10 px-3 py-1 text-[11px] font-semibold text-brand-600 transition hover:bg-brand-500/20 dark:text-brand-300"
+-                      >
+-                        {tagLabel(tag)}
+-                        <X size={12} />
+-                      </button>
+-                    ))
+-                  ) : (
+-                    <span className="text-xs text-slate-400">No tags yet</span>
+-                  )}
+-                </div>
+-                <div className="mt-3 flex flex-wrap gap-2">
+-                  {suggestedTags.map((tag) => (
+-                    <button
+-                      key={tag}
+-                      type="button"
+-                      onClick={() => setEditTags((current) => mergeTags(current, [tag]))}
+-                      className="rounded-full border border-white/30 bg-white/60 px-3 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-white/80 dark:border-white/10 dark:bg-white/5 dark:text-slate-300"
+-                    >
+-                      + {tagLabel(tag)}
+-                    </button>
+-                  ))}
+-                </div>
+-              </div>
+-              <label className="block">
+-                <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">AI Instructions</span>
+-                <textarea value={aiInstructions} onChange={(event) => setAiInstructions(event.target.value)} rows={4} className="w-full rounded-xl border border-white/50 bg-white/50 px-3 py-2 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+-              </label>
+-              <button disabled={savingId === selectedLead.id} className="mt-4 w-full rounded-xl bg-brand-600 py-2.5 text-sm font-bold text-white shadow-glow transition hover:bg-brand-500 disabled:opacity-60">
+-                Save Changes
+-              </button>
+-            </form>
+-          </div>
+-        )}
+-
+-      </div>
+-    );
+-  }
++        </div>
++      );
++    }
+ 
+-  return (
+-    <ProtectedPage>
+-      <section className="min-h-[calc(100vh-54px)] overflow-x-clip bg-transparent px-4 pb-8 pt-4 sm:px-6 sm:pb-10 sm:pt-6">
++    return (
++      <ProtectedPage>
++        <section className="min-h-[calc(100vh-54px)] overflow-x-clip bg-transparent px-4 pb-8 pt-4 sm:px-6 sm:pb-10 sm:pt-6">
+         <div className="mx-auto w-full max-w-screen-2xl min-w-0">
+         <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+           <div>
+             <p className="text-xs font-semibold uppercase tracking-widest text-brand-500 dark:text-brand-400">Lead Management</p>
+             <h1 className="mt-1 text-2xl font-bold text-slate-900 dark:text-white">Lead Operations</h1>
+           </div>
++          <div className="flex items-center gap-2">
++            <button
++              onClick={() => setCreateLeadOpen(true)}
++              className="flex h-11 items-center gap-2 rounded-xl bg-brand-600 px-4 text-sm font-bold text-white shadow-glow transition hover:bg-brand-500 sm:h-10"
++            >
++              <Plus size={16} />
++              <span className="hidden sm:inline">Create New Lead</span>
++            </button>
++          </div>
+           <div className="flex w-full items-center gap-2 sm:w-auto">
+             <button
+               type="button"
+@@ -1208,55 +1160,16 @@ export default function LeadsPage() {
+           </div>
+         )}
+ 
+-        {/* Magic Convert + Create Lead ΓÇö admin only */}
+-        {currentUser?.role === "admin" && (<>
+-          <div className="mb-5 glass-card p-4">
+-            <label className="mb-3 block">
+-            <div className="mb-2 flex items-center gap-2">
+-              <Sparkles size={15} className="text-brand-500" />
+-              <span className="text-sm font-semibold text-slate-900 dark:text-white">Magic Convert (AI)</span>
+-              <span className="text-xs text-slate-500">Paste raw notes and we'll extract the lead info</span>
+-            </div>
+-            <textarea
+-              value={rawNotes}
+-              onChange={(event) => setRawNotes(event.target.value)}
+-              placeholder="Paste agent notes, call transcripts, or chat messages here..."
+-              className="h-24 w-full rounded-xl border border-white/50 bg-white/55 p-3 text-sm text-slate-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-400/20 dark:border-white/10 dark:bg-black/20 dark:text-white"
+-            />
+-          </label>
+-          <button
+-            type="button"
+-            onClick={convertNotesWithAI}
+-            disabled={convertingNotes || !rawNotes.trim()}
+-            className="flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-purple-500 px-4 text-sm font-semibold text-white shadow-glow-sm transition hover:bg-purple-600 active:scale-95 disabled:opacity-60"
+-          >
+-            <Sparkles size={16} />
+-            {convertingNotes ? "Converting..." : "Magic Convert"}
+-          </button>
+-          {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
+-          {industryData && Object.keys(industryData).length > 0 && (
+-            <div className="mt-3 rounded-xl border border-purple-200/50 bg-purple-50/60 p-3 dark:border-purple-500/20 dark:bg-purple-500/10">
+-              <p className="mb-1.5 flex items-center gap-1 text-[11px] font-bold uppercase tracking-widest text-purple-600 dark:text-purple-400">
+-                <Sparkles size={10} /> AI Extracted ΓÇö Industry Data
+-              </p>
+-              <div className="flex flex-wrap gap-2">
+-                {Object.entries(industryData).map(([key, value]) =>
+-                  value !== null && value !== undefined && String(value).trim() !== "" ? (
+-                    <span key={key} className="rounded-lg bg-purple-100/80 px-2 py-0.5 text-[11px] font-semibold text-purple-700 dark:bg-purple-500/20 dark:text-purple-300">
+-                      {key.replace(/_/g, " ")}: {String(value)}
+-                    </span>
+-                  ) : null
+-                )}
+-              </div>
+-            </div>
+-          )}
+-        </div>
+-
+-        <form onSubmit={createLead} className="mb-8 glass-card overflow-hidden">
+-          {/* Form Header */}
+-          <div className="border-b border-white/10 bg-white/20 px-6 py-4 dark:bg-white/5">
+-            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">Create New Lead</h3>
+-          </div>
++        {createLeadOpen && (
++          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm animate-fade-in">
++            <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl border border-white/20 bg-white/95 shadow-2xl backdrop-blur-2xl dark:border-white/10 dark:bg-slate-900/95">
++              <form onSubmit={createLead} className="overflow-hidden">
++                <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/10 bg-white/20 px-6 py-4 backdrop-blur-xl dark:bg-white/5">
++                  <h3 className="text-sm font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">Create New Lead</h3>
++                  <button type="button" onClick={() => setCreateLeadOpen(false)} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-200 dark:hover:bg-white/10 dark:text-slate-400">
++                    <X size={20} />
++                  </button>
++                </div>
+ 
+           <div className="p-6">
+             <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+@@ -1348,14 +1261,14 @@ export default function LeadsPage() {
+                       value={leadStageId}
+                       onChange={setLeadStageId}
+                       icon={Filter}
+-                      placeholder="Stage"
++                      placeholder="Select Stage"
+                       options={configs.stages.map((item) => ({ value: item.id, label: item.name }))}
+                     />
+                     <ThemedSelect
+                       value={leadPriority}
+                       onChange={setLeadPriority}
+                       icon={Zap}
+-                      placeholder="Priority"
++                      placeholder="Select Priority"
+                       options={[
+                         { value: "high", label: "High" },
+                         { value: "medium", label: "Medium" },
+@@ -1560,6 +1473,29 @@ export default function LeadsPage() {
+             )}
+ 
+             <div className="mt-8 flex items-center justify-end border-t border-white/10 pt-6">
++              <div className="flex-1">
++                <div className="mb-4 flex items-center gap-2 cursor-pointer" onClick={() => setExtraInfoMenuOpen(!extraInfoMenuOpen)}>
++                  <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-brand-500/20 text-brand-600 dark:bg-brand-500/40 dark:text-brand-300">
++                    <Plus size={14} className={extraInfoMenuOpen ? 'rotate-45 transition-transform' : 'transition-transform'} />
++                  </div>
++                  <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">Additional Information</h4>
++                </div>
++                {extraInfoMenuOpen && (
++                  <div className="grid gap-4 sm:grid-cols-2 animate-fade-down pr-8">
++                    {additionalInfoOptions.map(opt => (
++                      <label key={opt.key} className="block text-left">
++                        <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">{opt.label}</span>
++                        <input
++                          value={extraInfoValues[opt.key] || ''}
++                          onChange={e => setExtraInfoValues(prev => ({ ...prev, [opt.key]: e.target.value }))}
++                          className="h-10 w-full rounded-xl border border-white/40 bg-white/50 px-3 text-sm text-slate-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-400/20 dark:border-white/10 dark:bg-black/30 dark:text-white"
++                          placeholder={`Enter ${opt.label.toLowerCase()}`}
++                        />
++                      </label>
++                    ))}
++                  </div>
++                )}
++              </div>
+               <button
+                 type="submit"
+                 disabled={loading}
+@@ -1571,9 +1507,11 @@ export default function LeadsPage() {
+             </div>
+           </div>
+         </form>
+-        </>)}
++            </div>
++          </div>
++        )}
+ 
+-        <div className="mb-5 grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
++        <div className="mb-5 grid min-w-0 gap-3">
+           <div className="min-w-0 space-y-3">
+             <div className="glass-card relative z-30 flex flex-wrap items-center gap-3 p-3">
+               <div className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-xl border border-white/50 bg-white/50 px-3 dark:border-white/10 dark:bg-black/20 sm:h-10 sm:min-w-[220px]">
+@@ -1793,7 +1731,7 @@ export default function LeadsPage() {
+                     {filteredLeads.map((lead) => (
+                       <tr
+                         key={lead.id}
+-                        onClick={() => { setLeadSidebarTab("details"); openLead(lead.id); }}
++                        onClick={() => { openLead(lead.id); }}
+                         className={`cursor-pointer transition hover:bg-white/40 dark:hover:bg-white/10 ${selectedId === lead.id ? "bg-brand-500/8 dark:bg-brand-500/10 ring-1 ring-inset ring-brand-500/20" : ""}`}
+                       >
+                         <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">{formatDate(lead.created_at)}</td>
+@@ -1825,17 +1763,9 @@ export default function LeadsPage() {
+                         <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">Admin</td>
+                         <td className="px-5 py-4 text-right" onClick={(e) => e.stopPropagation()}>
+                           <div className="flex items-center justify-end gap-1.5 text-slate-400">
+-                            <button onClick={() => { setLeadSidebarTab("activity"); openLead(lead.id); }} className="rounded p-1.5 hover:bg-white/60 hover:text-brand-500 dark:hover:bg-white/10">
+-                              <Activity size={16} />
+-                            </button>
+-                            <button onClick={() => { setLeadSidebarTab("details"); openLead(lead.id); }} className="rounded p-1.5 hover:bg-white/60 hover:text-brand-500 dark:hover:bg-white/10">
++                            <button onClick={() => { openLead(lead.id); }} className="rounded p-1.5 hover:bg-white/60 hover:text-brand-500 dark:hover:bg-white/10">
+                               <Eye size={16} />
+                             </button>
+-                            {currentUser?.role === "admin" && (
+-                              <button onClick={() => { setLeadSidebarTab("edit"); openLead(lead.id); }} className="rounded p-1.5 hover:bg-white/60 hover:text-brand-500 dark:hover:bg-white/10">
+-                                <Edit2 size={16} />
+-                              </button>
+-                            )}
+                             {currentUser?.role === "admin" && (
+                               <button onClick={() => void deleteLead(lead.id)} className="rounded p-1.5 hover:bg-rose-500/10 hover:text-rose-500">
+                                 <Trash2 size={16} />
+@@ -1852,26 +1782,30 @@ export default function LeadsPage() {
+             )}
+           </div>
+ 
+-          <aside className="hidden glass-card h-fit p-4 lg:sticky lg:top-[70px] lg:block">
+-            {renderLeadDetail()}
+-          </aside>
+         </div>
+-        {mobileDetailOpen && selectedLead ? (
+-          <div className="fixed inset-0 z-40 lg:hidden">
+-            <button
+-              type="button"
+-              aria-label="Close lead detail"
+-              onClick={() => setMobileDetailOpen(false)}
+-              className="absolute inset-0 bg-slate-950/35 backdrop-blur-sm"
+-            />
+-            <aside
++        {selectedLead ? (
++          <div className="fixed inset-0 z-[100] flex justify-center items-center p-4 bg-slate-950/40 backdrop-blur-sm transition-opacity">
++            <div
+               role="dialog"
+               aria-modal="true"
+               aria-label="Lead detail"
+-              className="absolute inset-x-0 bottom-0 top-[72px] overflow-y-auto overscroll-contain rounded-t-[28px] bg-white px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 shadow-[0_-20px_50px_rgba(15,23,42,0.22)] dark:bg-slate-950"
++              className="relative w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl bg-white shadow-2xl dark:bg-slate-900 animate-scale-in border border-white/20 dark:border-white/10"
+             >
+-              {renderLeadDetail(true)}
+-            </aside>
++              {/* Header with sticky close button */}
++              <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/10 bg-white/20 px-6 py-4 backdrop-blur-xl dark:bg-white/5">
++                 <h3 className="text-sm font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">Lead Profile</h3>
++                 <button 
++                  onClick={() => setSelectedId(null)}
++                  className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-200 dark:hover:bg-white/10"
++                 >
++                  <X size={20} />
++                 </button>
++              </div>
++              
++              <div className="flex-1 overflow-y-auto p-6">
++                {renderLeadDetail(true)}
++              </div>
++            </div>
+           </div>
+         ) : null}
+         </div>
