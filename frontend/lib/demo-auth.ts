@@ -16,6 +16,7 @@ export function isDemoCredentials(email: string, password: string): boolean {
 export function startDemoSession(): void {
   if (canUseStorage()) {
     window.localStorage.setItem(DEMO_SESSION_KEY, "active");
+    window.localStorage.setItem(DEV_WORKSPACE_KEY, "dev-user");
     document.cookie = `${AUTH_COOKIE_NAME}=demo; path=/; max-age=604800; samesite=lax`;
   }
 }
@@ -33,6 +34,11 @@ export function isDemoSessionActive(): boolean {
 
 export function getDevWorkspaceId(): string {
   if (!canUseStorage()) {
+    return "dev-user";
+  }
+
+  if (isDemoSessionActive()) {
+    window.localStorage.setItem(DEV_WORKSPACE_KEY, "dev-user");
     return "dev-user";
   }
 

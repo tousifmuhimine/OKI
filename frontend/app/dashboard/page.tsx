@@ -1,13 +1,14 @@
 "use client";
 
   import { useEffect, useState, useMemo } from "react";
+  import { useRouter } from "next/navigation";
 import {
-  Calendar, Settings, Maximize2, Plus, RefreshCw, X,
+    Calendar, Settings, Maximize2, Plus, RefreshCw, X,
   ChevronRight, Target, CheckSquare, MoreHorizontal,
   Clock, TrendingUp, Info, Users, ChevronDown, Zap,
   Activity, ArrowUpRight, Flame, Circle, ChevronLeft,
-  CalendarDays, AlignLeft, MessageCircle, BrainCircuit,
-  HandMetal, ShieldCheck, Wallet, Tag,
+    CalendarDays, AlignLeft, MessageCircle, BrainCircuit,
+    HandMetal, ShieldCheck, Wallet, Tag, Eye, Edit2,
 } from "lucide-react";
 
 import { ProtectedPage } from "@/components/protected-page";
@@ -141,6 +142,7 @@ function getTopBreakdownItem(breakdown: Record<string, number>) {
 //  Dashboard
 // ═══════════════════════════════════════════════════════════════
 export default function DashboardPage() {
+  const router = useRouter();
   const [data, setData]           = useState<DashboardSummary | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [error, setError]         = useState<string | null>(null);
@@ -218,7 +220,7 @@ export default function DashboardPage() {
         setData(summary); setCustomers(cust.data); setError(null);
       }).catch((e: Error) => { if (alive) setError(e.message); });
     } else if (userId) {
-      apiRequest<{ data: any[] }>("/leads?quick_filter=assigned_to_me&sort=desc&limit=50")
+      apiRequest<{ data: any[] }>("/ai/assigned-leads?sort=desc&limit=50")
         .then((response) => {
           if (!alive) return;
           setBucketLeads(response.data || []);
@@ -241,16 +243,7 @@ export default function DashboardPage() {
     async function loadBucket() {
       setLoadingBucket(true);
       try {
-        const now = new Date();
-        let start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        if (bucketTab === "This Week") {
-          start.setDate(now.getDate() - now.getDay());
-        } else if (bucketTab === "This Month") {
-          start = new Date(now.getFullYear(), now.getMonth(), 1);
-        }
-        const sd = start.toISOString();
-        
-        const leadsRes = await apiRequest("/leads?quick_filter=assigned_to_me&start_date=" + sd + "&sort=desc&limit=20");
+        const leadsRes = await apiRequest("/ai/assigned-leads?sort=desc&limit=20");
         if (!alive) return;
         setBucketLeads((leadsRes as any).data || []);
       } catch (err) {
@@ -322,6 +315,10 @@ export default function DashboardPage() {
   };
 
   const todayStr = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+
+  const openLead = (leadId: string, tab: "details" | "edit" = "details") => {
+    router.push(`/leads?leadId=${encodeURIComponent(leadId)}&tab=${tab}`);
+  };
 
   const getPriorityColor = (prio: string) => {
     if (prio === "high") return "bg-rose-500";
@@ -445,14 +442,32 @@ export default function DashboardPage() {
                     No leads assigned to you yet.
                   </div>
                 ) : bucketLeads.map((lead) => (
-                  <div key={lead.id} className="flex items-center justify-between rounded-2xl border border-white/20 bg-white/30 px-4 py-3 dark:border-white/10 dark:bg-white/5">
-                    <div>
+                  <div key={lead.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/20 bg-white/30 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+                    <button type="button" onClick={() => openLead(lead.id, "details")} className="min-w-0 text-left">
                       <p className="font-semibold text-slate-900 dark:text-white">{lead.company_name || lead.name || "Unnamed lead"}</p>
                       <p className="text-xs text-slate-500 dark:text-slate-400">{lead.contact_person || lead.source || "Assigned lead"}</p>
+                    </button>
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-full bg-slate-900/5 px-3 py-1 text-[11px] font-semibold text-slate-600 dark:bg-white/10 dark:text-slate-300">
+                        {lead.status || "new"}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => openLead(lead.id, "details")}
+                        className="flex h-8 items-center gap-1 rounded-lg bg-white/60 px-3 text-[11px] font-semibold text-slate-700 transition hover:bg-white/90 dark:bg-white/10 dark:text-slate-200 dark:hover:bg-white/15"
+                      >
+                        <Eye size={13} />
+                        View
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openLead(lead.id, "edit")}
+                        className="flex h-8 items-center gap-1 rounded-lg bg-brand-500/10 px-3 text-[11px] font-semibold text-brand-700 transition hover:bg-brand-500/15 dark:text-brand-300"
+                      >
+                        <Edit2 size={13} />
+                        Edit
+                      </button>
                     </div>
-                    <span className="rounded-full bg-slate-900/5 px-3 py-1 text-[11px] font-semibold text-slate-600 dark:bg-white/10 dark:text-slate-300">
-                      {lead.status || "new"}
-                    </span>
                   </div>
                 ))}
               </div>

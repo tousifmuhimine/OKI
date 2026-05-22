@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, get_current_auth, get_session_dep
@@ -67,13 +67,22 @@ def _message_out(message: Message) -> MessageOut:
 
 async def _get_owned_conversation(
     conversation_id: str,
-    workspace_id: str,
+    auth: AuthContext,
     session: AsyncSession,
 ) -> Conversation:
     conversation = await session.get(Conversation, conversation_id)
-    if not conversation or conversation.workspace_id != workspace_id:
+    candidates = [auth.user_id]
+    if getattr(auth, "org_id", None):
+        candidates.append(auth.org_id)
+    if not conversation or conversation.workspace_id not in candidates:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return conversation
+
+
+def _ownership_condition(field, auth: AuthContext):
+    if getattr(auth, "org_id", None):
+        return or_(field == auth.user_id, field == auth.org_id)
+    return field == auth.user_id
 
 
 async def _can_view_all_conversations(auth: AuthContext, session: AsyncSession) -> bool:
@@ -146,13 +155,14 @@ async def list_conversations(
     session: AsyncSession = Depends(get_session_dep),
 ) -> ConversationListResponse:
     can_view_all = await _can_view_all_conversations(auth, session)
+    ownership_cond = _ownership_condition(Conversation.workspace_id, auth)
     query = (
         select(Conversation, Contact, Inbox)
         .join(Contact, Contact.id == Conversation.contact_id)
         .join(Inbox, Inbox.id == Conversation.inbox_id)
-        .where(Conversation.workspace_id == auth.user_id)
+        .where(ownership_cond)
     )
-    count_query = select(func.count(Conversation.id)).where(Conversation.workspace_id == auth.user_id)
+    count_query = select(func.count(Conversation.id)).where(ownership_cond)
     if not can_view_all:
         query = query.where(Conversation.assigned_user_id == auth.user_id)
         count_query = count_query.where(Conversation.assigned_user_id == auth.user_id)
@@ -194,12 +204,13 @@ async def list_assigned_conversations(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> ConversationListResponse:
+    ownership_cond = _ownership_condition(Conversation.workspace_id, auth)
     query = (
         select(Conversation, Contact, Inbox)
         .join(Contact, Contact.id == Conversation.contact_id)
         .join(Inbox, Inbox.id == Conversation.inbox_id)
         .where(
-            Conversation.workspace_id == auth.user_id,
+            ownership_cond,
             Conversation.assigned_user_id == auth.user_id,
         )
         .order_by(Conversation.last_message_at.desc().nullslast())
@@ -207,7 +218,7 @@ async def list_assigned_conversations(
         .offset(offset)
     )
     count_query = select(func.count(Conversation.id)).where(
-        Conversation.workspace_id == auth.user_id,
+        ownership_cond,
         Conversation.assigned_user_id == auth.user_id,
     )
 
@@ -238,7 +249,7 @@ async def get_conversation(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> ConversationOut:
-    conversation = await _get_owned_conversation(conversation_id, auth.user_id, session)
+    conversation = await _get_owned_conversation(conversation_id, auth, session)
     if auth.role != "admin" and not await _can_access_conversation(conversation, auth, session):
         raise HTTPException(status_code=404, detail="Conversation not found")
     contact = await session.get(Contact, conversation.contact_id)
@@ -261,7 +272,7 @@ async def pause_conversation(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> ConversationOut:
-    conversation = await _get_owned_conversation(conversation_id, auth.user_id, session)
+    conversation = await _get_owned_conversation(conversation_id, auth, session)
     if auth.role != "admin" and not await _can_access_conversation(conversation, auth, session):
         raise HTTPException(status_code=404, detail="Conversation not found")
     conversation.is_bot_paused = True
@@ -279,7 +290,7 @@ async def resume_conversation(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> ConversationOut:
-    conversation = await _get_owned_conversation(conversation_id, auth.user_id, session)
+    conversation = await _get_owned_conversation(conversation_id, auth, session)
     if auth.role != "admin" and not await _can_access_conversation(conversation, auth, session):
         raise HTTPException(status_code=404, detail="Conversation not found")
     conversation.is_bot_paused = False
@@ -295,7 +306,7 @@ async def takeover_conversation(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> ConversationOut:
-    conversation = await _get_owned_conversation(conversation_id, auth.user_id, session)
+    conversation = await _get_owned_conversation(conversation_id, auth, session)
     if auth.role != "admin" and not await _can_access_conversation(conversation, auth, session):
         raise HTTPException(status_code=404, detail="Conversation not found")
     conversation.is_bot_paused = True
@@ -314,7 +325,7 @@ async def list_messages(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> MessageListResponse:
-    conversation = await _get_owned_conversation(conversation_id, auth.user_id, session)
+    conversation = await _get_owned_conversation(conversation_id, auth, session)
     if auth.role != "admin" and not await _can_access_conversation(conversation, auth, session):
         raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -347,12 +358,15 @@ async def create_message(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> MessageOut:
-    conversation = await _get_owned_conversation(conversation_id, auth.user_id, session)
+    conversation = await _get_owned_conversation(conversation_id, auth, session)
     if auth.role != "admin" and not await _can_access_conversation(conversation, auth, session):
         raise HTTPException(status_code=404, detail="Conversation not found")
     inbox = await session.get(Inbox, conversation.inbox_id)
     contact = await session.get(Contact, conversation.contact_id)
-    if not inbox or inbox.workspace_id != auth.user_id:
+    candidates = [auth.user_id]
+    if getattr(auth, "org_id", None):
+        candidates.append(auth.org_id)
+    if not inbox or inbox.workspace_id not in candidates:
         raise HTTPException(status_code=404, detail="Inbox not found")
 
     channel_config = decrypt_channel_config(inbox.channel_config)
@@ -395,7 +409,7 @@ async def compose_email_message(
     session: AsyncSession = Depends(get_session_dep),
 ) -> ConversationOut:
     inbox_query = select(Inbox).where(
-        Inbox.workspace_id == auth.user_id,
+        _ownership_condition(Inbox.workspace_id, auth),
         Inbox.channel_type == "email",
     )
     if payload.inbox_id:
@@ -408,7 +422,7 @@ async def compose_email_message(
     contact = (
         await session.execute(
             select(Contact).where(
-                Contact.workspace_id == auth.user_id,
+                _ownership_condition(Contact.workspace_id, auth),
                 Contact.email == email_address,
             )
         )
@@ -426,7 +440,7 @@ async def compose_email_message(
     conversation = (
         await session.execute(
             select(Conversation).where(
-                Conversation.workspace_id == auth.user_id,
+                _ownership_condition(Conversation.workspace_id, auth),
                 Conversation.inbox_id == inbox.id,
                 Conversation.contact_id == contact.id,
             )
@@ -494,14 +508,15 @@ async def list_contacts(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> ContactListResponse:
+    ownership_cond = _ownership_condition(Contact.workspace_id, auth)
     query = (
         select(Contact)
-        .where(Contact.workspace_id == auth.user_id)
+        .where(ownership_cond)
         .order_by(Contact.created_at.desc())
         .limit(limit)
         .offset(offset)
     )
-    count_query = select(func.count(Contact.id)).where(Contact.workspace_id == auth.user_id)
+    count_query = select(func.count(Contact.id)).where(ownership_cond)
 
     rows = (await session.execute(query)).scalars().all()
     total = (await session.execute(count_query)).scalar_one()

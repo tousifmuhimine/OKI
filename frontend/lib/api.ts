@@ -47,11 +47,19 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
     let detail = `Request failed (${response.status})`;
     try {
       const payload = (await response.json()) as { detail?: string };
-      if (payload.detail) {
+      if (payload && payload.detail) {
         detail = payload.detail;
       }
     } catch {
-      // Ignore non-JSON error body.
+      try {
+        const text = await response.text();
+        if (text) {
+          // Truncate long bodies to keep messages readable
+          detail = `${detail}: ${text.slice(0, 1000)}`;
+        }
+      } catch {
+        // Ignore reading body failures
+      }
     }
     if (response.status === 401 && typeof window !== "undefined") {
       clearAllAuthState();

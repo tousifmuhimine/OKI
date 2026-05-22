@@ -11,6 +11,8 @@ from app.api.deps import has_permission
 from app.db.models import AIEvent, Conversation, Lead,UserLLMConfig
 from app.inbox.llm_providers.groq import SUPPORTED_GROQ_MODELS
 from app.inbox.security import encrypt_channel_config, summarize_channel_config
+from app.schemas.common import PaginationMeta
+from app.schemas.lead import LeadListResponse
 from app.schemas.llm import UserLLMConfigCreate, UserLLMConfigRead
 from app.services.ai_reply import generate_ai_reply
 from app.services.entity_extraction import (
@@ -23,6 +25,14 @@ from app.schemas.lead import LeadOut
 
 
 router = APIRouter()
+
+
+def _assigned_lead_filters(auth: AuthContext):
+    return or_(Lead.assigned_user_id == auth.user_id, Lead.assigned_agent_id == auth.user_id)
+
+
+def _is_assigned_lead(lead: Lead, auth: AuthContext) -> bool:
+    return lead.assigned_user_id == auth.user_id or lead.assigned_agent_id == auth.user_id
 
 
 class GenerateReplyRequest(BaseModel):
@@ -317,6 +327,53 @@ async def detect_intent(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to detect intent: {str(e)}")
+
+
+@router.get("/assigned-leads", response_model=LeadListResponse)
+async def list_assigned_leads(
+    limit: int = 50,
+    offset: int = 0,
+    sort: str = "desc",
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> LeadListResponse:
+    """Return only the leads assigned to the current agent.
+
+    This is intentionally agent-scoped and does not rely on the admin leads route.
+    """
+    order_column = Lead.created_at.asc() if sort == "asc" else Lead.created_at.desc()
+    base_filter = _assigned_lead_filters(auth)
+
+    query = (
+        select(Lead)
+        .where(base_filter)
+        .order_by(order_column)
+        .limit(limit)
+        .offset(offset)
+    )
+    count_query = select(func.count(Lead.id)).where(base_filter)
+
+    rows = (await session.execute(query)).scalars().all()
+    total = (await session.execute(count_query)).scalar_one()
+
+    return LeadListResponse(
+        data=[LeadOut.model_validate(row) for row in rows],
+        meta=PaginationMeta(total=total, limit=limit, offset=offset),
+    )
+
+
+@router.get("/assigned-leads/{lead_id}", response_model=LeadOut)
+async def get_assigned_lead(
+    lead_id: str,
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> LeadOut:
+    lead = await session.get(Lead, lead_id)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if not _is_assigned_lead(lead, auth):
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return LeadOut.model_validate(lead)
 
 
 class MonitorStatusResponse(BaseModel):

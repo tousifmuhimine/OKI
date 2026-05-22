@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowRight,
   ArrowLeft,
@@ -67,6 +68,13 @@ const statuses = [
 ];
 
 const suggestedTags = ["vip", "hot", "follow-up", "inbound", "upsell"];
+const industryOptions = [
+  { value: "real_estate", label: "Real Estate" },
+  { value: "ecommerce", label: "E-com" },
+  { value: "agro", label: "Agro" },
+  { value: "manufacture", label: "Manufacture" },
+  { value: "study_abroad", label: "Study Abroad" },
+];
 
 type LeadConfigs = {
   sources: LeadSourceConfig[];
@@ -140,6 +148,8 @@ function apiDate(value: string, endOfDay = false) {
 }
 
 export default function LeadsPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [users, setUsers] = useState<{ id: string; name: string | null; email: string | null }[]>([]);
   const [analytics, setAnalytics] = useState<LeadAnalyticsSummary | null>(null);
@@ -319,7 +329,11 @@ export default function LeadsPage() {
       }
       if (startDate) params.set("start_date", apiDate(startDate));
       if (endDate) params.set("end_date", apiDate(endDate, true));
-      const leadResponse = await apiRequest<LeadListResponse>(`/leads?${params.toString()}`);
+      const leadResponse = await apiRequest<LeadListResponse>(
+        currentUser?.role === "agent"
+          ? `/ai/assigned-leads?${params.toString()}`
+          : `/leads?${params.toString()}`
+      );
       let summaryResponse: LeadAnalyticsSummary | null = null;
       try {
         summaryResponse = await apiRequest<LeadAnalyticsSummary>("/leads/analytics/summary");
@@ -337,6 +351,17 @@ export default function LeadsPage() {
     }
   }
 
+  useEffect(() => {
+    const leadId = searchParams.get("leadId");
+    const tab = searchParams.get("tab");
+    if (tab === "activity" || tab === "edit" || tab === "details") {
+      setLeadSidebarTab(tab);
+    }
+    if (leadId && leadId !== selectedId) {
+      setSelectedId(leadId);
+    }
+  }, [searchParams, selectedId]);
+
   async function loadConfigs() {
     try {
       const [sources, stages, sectors, areas, professions, usersRes] = await Promise.all([
@@ -345,7 +370,9 @@ export default function LeadsPage() {
         apiRequest<LeadNamedConfig[]>("/config/lead-sectors?active_only=true"),
         apiRequest<LeadNamedConfig[]>("/config/lead-areas?active_only=true"),
         apiRequest<LeadNamedConfig[]>("/config/lead-professions?active_only=true"),
-        apiRequest<{ data: { id: string; name: string | null; email: string | null; role: string | null }[] }>("/admin/users").catch(() => ({ data: [] })),
+        currentUser?.role === "admin"
+          ? apiRequest<{ data: { id: string; name: string | null; email: string | null; role: string | null }[] }>("/admin/users").catch(() => ({ data: [] }))
+          : Promise.resolve({ data: [] }),
       ]);
       setConfigs({ sources, stages, sectors, areas, professions });
       setUsers(usersRes.data);
@@ -377,7 +404,10 @@ export default function LeadsPage() {
     });
   }, []);
 
-  useEffect(() => { void loadConfigs(); }, []);
+  useEffect(() => {
+    if (!currentUser) return;
+    void loadConfigs();
+  }, [currentUser]);
   useEffect(() => { void loadLeads(); }, [quickFilter, currentUser]);
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -662,8 +692,33 @@ export default function LeadsPage() {
   }
 
 
+  async function loadLeadDetail(leadId: string) {
+    try {
+      const detailed = await apiRequest<Lead>(currentUser?.role === "agent" ? `/ai/assigned-leads/${leadId}` : `/leads/${leadId}`);
+      setLeads((current) => {
+        const exists = current.some((l) => l.id === detailed.id);
+        if (exists) {
+          return current.map((l) => (l.id === detailed.id ? detailed : l));
+        }
+        return [detailed, ...current];
+      });
+      setError(null);
+      if (leadSidebarTab === "activity") {
+        void loadActivities(leadId);
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   function openLead(leadId: string) {
+    // Ensure we have the canonical lead payload before showing details.
+    void loadLeadDetail(leadId);
     setSelectedId(leadId);
+  }
+
+  function goToLead(leadId: string, tab: "details" | "edit" = "details") {
+    router.push(`/leads?leadId=${encodeURIComponent(leadId)}&tab=${tab}`);
   }
 
   function renderLeadDetail(overlay = false) {
@@ -1209,6 +1264,7 @@ export default function LeadsPage() {
                   <label className="relative block">
                     <Building2 size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
                     <input
+                      name="company_name"
                       required
                       value={companyName}
                       onChange={(event) => setCompanyName(event.target.value)}
@@ -1219,6 +1275,7 @@ export default function LeadsPage() {
                   <label className="relative block">
                     <User size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
                     <input
+                      name="contact_person"
                       value={contactPerson}
                       onChange={(event) => setContactPerson(event.target.value)}
                       className="h-11 w-full rounded-xl border border-white/40 bg-white/50 py-2 pl-11 pr-4 text-sm text-slate-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-400/20 dark:border-white/10 dark:bg-black/30 dark:text-white"
@@ -1235,6 +1292,7 @@ export default function LeadsPage() {
                   <label className="relative block">
                     <Phone size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
                     <input
+                      name="phone"
                       value={phone}
                       onChange={(event) => setPhone(event.target.value)}
                       className="h-11 w-full rounded-xl border border-white/40 bg-white/50 py-2 pl-11 pr-4 text-sm text-slate-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-400/20 dark:border-white/10 dark:bg-black/30 dark:text-white"
@@ -1244,6 +1302,7 @@ export default function LeadsPage() {
                   <label className="relative block">
                     <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
                     <input
+                      name="email"
                       value={email}
                       onChange={(event) => setEmail(event.target.value)}
                       className="h-11 w-full rounded-xl border border-white/40 bg-white/50 py-2 pl-11 pr-4 text-sm text-slate-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-400/20 dark:border-white/10 dark:bg-black/30 dark:text-white"
@@ -1259,19 +1318,15 @@ export default function LeadsPage() {
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     <ThemedSelect
+                      name="industry"
                       value={industry}
                       onChange={setIndustry}
                       icon={Building2}
                       placeholder="Select Industry"
-                      options={[
-                        { value: "real_estate", label: "Real Estate" },
-                        { value: "ecommerce", label: "E-com" },
-                        { value: "agro", label: "Agro" },
-                        { value: "manufacture", label: "Manufacture" },
-                        { value: "study_abroad", label: "Study Abroad" },
-                      ]}
+                      options={industryOptions}
                     />
                     <ThemedSelect
+                      name="lead_source_id"
                       value={leadSourceId}
                       onChange={(value) => {
                         setLeadSourceId(value);
@@ -1287,6 +1342,7 @@ export default function LeadsPage() {
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <ThemedSelect
+                      name="lead_stage_id"
                       value={leadStageId}
                       onChange={setLeadStageId}
                       icon={Filter}
@@ -1294,6 +1350,7 @@ export default function LeadsPage() {
                       options={configs.stages.map((item) => ({ value: item.id, label: item.name }))}
                     />
                     <ThemedSelect
+                      name="priority"
                       value={leadPriority}
                       onChange={setLeadPriority}
                       icon={Zap}
@@ -1307,6 +1364,7 @@ export default function LeadsPage() {
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <ThemedSelect
+                      name="lead_area_id"
                       value={leadAreaId}
                       onChange={setLeadAreaId}
                       icon={Globe}
@@ -1314,6 +1372,7 @@ export default function LeadsPage() {
                       options={[{ value: "", label: "No Area" }, ...configs.areas.map((item) => ({ value: item.id, label: item.name }))]}
                     />
                     <ThemedSelect
+                      name="lead_profession_id"
                       value={leadProfessionId}
                       onChange={setLeadProfessionId}
                       icon={User}
@@ -1341,6 +1400,7 @@ export default function LeadsPage() {
               </div>
               <label className="block">
                 <input
+                  name="tags"
                   value={tagInput}
                   onChange={(event) => setTagInput(event.target.value)}
                   onKeyDown={(event) => {

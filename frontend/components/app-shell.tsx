@@ -127,6 +127,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (!path) return true;
     const rule = routePermissions.find((item) => path === item.href || path.startsWith(`${item.href}/`));
     if (!rule) return true;
+    // Allow agents to see the Leads navigation entry even if they don't have the
+    // explicit `leads.view` permission, since data is already agent-scoped on
+    // the backend. This keeps the UX discoverable while preserving access control.
+    if (rule.href === "/leads" && currentUser.role === "agent") return true;
     return rule.permissions.some((permission) => hasPermission(permission));
   };
 
