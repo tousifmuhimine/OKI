@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -31,7 +31,7 @@ import {
   FileText,
   Loader2,
   BanknoteIcon,
-  ChevronDown, Briefcase, Edit, Smartphone, Flag, Calendar, Info, MoreVertical
+  ChevronDown, Briefcase, Edit
 } from "lucide-react";
 
 import { ProtectedPage } from "@/components/protected-page";
@@ -217,8 +217,6 @@ export default function LeadsPage() {
   const [aiInstructions, setAiInstructions] = useState("");
   const [editTags, setEditTags] = useState<string[]>([]);
   const [editTagInput, setEditTagInput] = useState("");
-  const [actionDropdownId, setActionDropdownId] = useState<string | null>(null);
-  const [editModalLeadId, setEditModalLeadId] = useState<string | null>(null);
 
   // Budget modal state (shown before conversion)
   const [budgetModalLeadId, setBudgetModalLeadId] = useState<string | null>(null);
@@ -425,6 +423,8 @@ export default function LeadsPage() {
       void loadActivities(selectedLead.id);
     }
   }, [selectedLead?.id, selectedLead?.ai_instructions, leadSidebarTab]);
+
+
 
   const filteredLeads = useMemo(() => {
     return leads;
@@ -691,6 +691,7 @@ export default function LeadsPage() {
     }
   }
 
+
   async function loadLeadDetail(leadId: string) {
     try {
       const detailed = await apiRequest<Lead>(currentUser?.role === "agent" ? `/ai/assigned-leads/${leadId}` : `/leads/${leadId}`);
@@ -724,116 +725,400 @@ export default function LeadsPage() {
     if (!selectedLead) {
       return (
         <div className="grid min-h-72 place-items-center px-6 text-center text-sm text-slate-500 dark:text-slate-400">
-          Add or select a lead to view details.
+          Add or select a lead to manage qualification.
         </div>
       );
     }
-
     return (
-      <div className="space-y-4">
-        <div className="rounded-xl border border-slate-100 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/5">
-          <h4 className="mb-4 flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-200">
-            <div className="flex h-6 w-6 items-center justify-center rounded bg-slate-200 dark:bg-slate-700">
-              <Info size={12} className="text-slate-700 dark:text-slate-200" />
-            </div>
-            Basic Information
-          </h4>
-          <div className="grid grid-cols-3 gap-6">
-            <div>
-              <span className="mb-1 block text-[11px] font-semibold text-slate-500">Name</span>
-              <p className="text-sm font-semibold text-slate-900 dark:text-white">{selectedLead.company_name}</p>
-            </div>
-            <div>
-              <span className="mb-1 block text-[11px] font-semibold text-slate-500">Phone</span>
-              <p className="text-sm font-semibold text-slate-900 dark:text-white">{selectedLead.phone || "N/A"}</p>
-            </div>
-            <div>
-              <span className="mb-1 block text-[11px] font-semibold text-slate-500">Email</span>
-              <p className="text-sm font-semibold text-slate-900 dark:text-white">{selectedLead.email || "N/A"}</p>
-            </div>
-            <div>
-              <span className="mb-1 block text-[11px] font-semibold text-slate-500">Source</span>
-              <p className="text-sm font-semibold capitalize text-slate-900 dark:text-white">{selectedSource?.name || selectedLead.source || "N/A"}</p>
-            </div>
-            <div>
-              <span className="mb-1 block text-[11px] font-semibold text-slate-500">Assigned To</span>
-              <p className="text-sm font-semibold text-slate-900 dark:text-white">{users.find(u => u.id === selectedLead.assigned_user_id)?.name || selectedLead.assigned_user_id || "N/A"}</p>
-            </div>
-            <div>
-              <span className="mb-1 block text-[11px] font-semibold text-slate-500">Address</span>
-              <p className="text-sm font-semibold text-slate-900 dark:text-white">{selectedLead.address || "N/A"}</p>
-            </div>
+      <div>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-widest text-brand-500">Lead profile</p>
+            <h2 className="mt-1 truncate text-xl font-bold text-slate-900 dark:text-white">{selectedLead.company_name}</h2>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{selectedLead.contact_person ?? "No contact person"}</p>
           </div>
-        </div>
-
-        <div className="rounded-xl border border-slate-100 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/5">
-          <h4 className="mb-4 flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-200">
-            <div className="flex h-6 w-6 items-center justify-center rounded bg-slate-200 dark:bg-slate-700">
-              <Flag size={12} className="text-slate-700 dark:text-slate-200" />
-            </div>
-            Lead Status
-          </h4>
-          <div className="grid grid-cols-4 gap-6">
-            <div>
-              <span className="mb-1 block text-[11px] font-semibold text-slate-500">Stage</span>
-              <span className="inline-block rounded bg-teal-600 px-2 py-0.5 text-xs font-bold text-white">
-                {selectedStage?.name || selectedLead.status || "N/A"}
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            {selectedLead.untouched ? (
+              <span className="rounded-lg bg-rose-500/15 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-rose-600 dark:text-rose-300">
+                Untouched
               </span>
-            </div>
-            <div>
-              <span className="mb-1 block text-[11px] font-semibold text-slate-500">Priority</span>
-              <p className="text-sm font-semibold capitalize text-slate-900 dark:text-white">{selectedLead.priority || "medium"}</p>
-            </div>
-            <div>
-              <span className="mb-1 block text-[11px] font-semibold text-slate-500">Interest Level</span>
-              <p className="text-sm font-semibold capitalize text-slate-900 dark:text-white">{selectedLead.intent || selectedLead.tags?.[0] || "N/A"}</p>
-            </div>
-            <div>
-              <span className="mb-1 block text-[11px] font-semibold text-slate-500">Budget</span>
-              <p className="text-sm font-semibold text-slate-900 dark:text-white">{selectedLead.budget_max ? `BDT ${selectedLead.budget_max}` : ((selectedLead.industry_data as any)?.budget || "N/A")}</p>
-            </div>
+            ) : null}
+            <span className={`rounded-lg px-2.5 py-1 text-xs font-bold ${stageTone(selectedStage?.name, selectedLead.status)}`}>
+              {selectedStage?.name ?? selectedLead.status}
+            </span>
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-100 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/5">
-          <h4 className="mb-4 flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-200">
-            <div className="flex h-6 w-6 items-center justify-center rounded bg-slate-200 dark:bg-slate-700">
-              <Calendar size={12} className="text-slate-700 dark:text-slate-200" />
+        {/* Share Button */}
+        <div className="mt-4 flex gap-2">
+           <button onClick={() => { setShareLeadId(selectedLead.id); setShareLink(null); setShareError(null); }} className="flex-1 flex justify-center items-center gap-2 rounded-xl bg-indigo-500/10 px-4 py-2 text-xs font-bold text-indigo-600 hover:bg-indigo-500/20 dark:text-indigo-400">
+             <Globe size={14} /> Share Lead
+           </button>
+           {currentUser?.role === "admin" && (
+             <button onClick={() => setBudgetModalLeadId(selectedLead.id)} className="flex-1 flex justify-center items-center gap-2 rounded-xl bg-emerald-500/10 px-4 py-2 text-xs font-bold text-emerald-600 hover:bg-emerald-500/20 dark:text-emerald-400">
+               <CheckCircle2 size={14} /> Convert
+             </button>
+           )}
+        </div>
+
+          <div className="animate-fade-in">
+            <dl className="mt-5 grid gap-3 text-sm">
+              <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Source</dt>
+                <dd className="mt-1 text-slate-900 dark:text-white">{selectedSource?.name ?? selectedLead.source ?? "Unsourced"}</dd>
+              </div>
+              <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Priority</dt>
+                <dd className="mt-1 capitalize text-slate-900 dark:text-white">{selectedLead.priority ?? "medium"}</dd>
+              </div>
+              <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Tags</dt>
+                <dd className="mt-2 flex flex-wrap gap-2">
+                  {selectedLead.tags?.length ? (
+                    selectedLead.tags.map((tag) => (
+                      <span key={tag} className="rounded-full bg-brand-500/10 px-2.5 py-1 text-[11px] font-semibold text-brand-600 dark:text-brand-300">
+                        {tagLabel(tag)}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-xs text-slate-400">No tags yet</span>
+                  )}
+                </dd>
+              </div>
+              <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Area</dt>
+                <dd className="mt-1 text-slate-900 dark:text-white">{selectedArea?.name ?? "Unassigned"}</dd>
+              </div>
+              <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Profession</dt>
+                <dd className="mt-1 text-slate-900 dark:text-white">{selectedProfession?.name ?? (selectedLead.industry_data as any)?.profession ?? "Unassigned"}</dd>
+              </div>
+              <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Industry</dt>
+                <dd className="mt-1 capitalize text-slate-900 dark:text-white">{selectedLead.industry?.replace(/_/g, " ") ?? "ΓÇö"}</dd>
+              </div>
+              {selectedLead.email && (
+                <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Email</dt>
+                  <dd className="mt-1 truncate text-slate-900 dark:text-white">{selectedLead.email}</dd>
+                </div>
+              )}
+              {selectedLead.phone && (
+                <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Phone</dt>
+                  <dd className="mt-1 text-slate-900 dark:text-white">{selectedLead.phone}</dd>
+                </div>
+              )}
+              <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Owner</dt>
+                <dd className="mt-1 truncate text-slate-900 dark:text-white">{selectedLead.assigned_user_id ?? "Unassigned"}</dd>
+              </div>
+              <div className="rounded-xl bg-white/35 p-3 dark:bg-white/5">
+                <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Created</dt>
+                <dd className="mt-1 text-slate-900 dark:text-white">{formatDate(selectedLead.created_at)}</dd>
+              </div>
+            </dl>
+
+            <details className="group mt-6 rounded-xl border border-white/20 bg-white/50 dark:border-white/10 dark:bg-white/5 overflow-hidden">
+            <summary className="cursor-pointer list-none flex items-center justify-between p-4 font-semibold text-slate-800 dark:text-slate-200 hover:bg-white/40 dark:hover:bg-white/10 transition">
+              <span className="flex items-center gap-2"><Briefcase size={16} className="text-brand-500" /> Industry Profile</span>
+              <ChevronDown size={16} className="text-slate-500 transition-transform group-open:rotate-180" />
+            </summary>
+            <div className="p-4 border-t border-white/20 dark:border-white/10 bg-white/20 dark:bg-black/10">
+              {Object.keys(selectedLead.industry_data ?? {}).length === 0 ? (
+                <p className="text-sm text-slate-500">No industry-specific data available.</p>
+              ) : (
+                <dl className="grid gap-3 sm:grid-cols-2 text-sm">
+                  {Object.entries(selectedLead.industry_data ?? {}).map(([key, value]) => (
+                    <div key={key} className="rounded-xl bg-white/50 p-3 dark:bg-black/20">
+                      <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">{key.replace(/_/g, " ")}</dt>
+                      <dd className="mt-1 font-medium text-slate-900 dark:text-white">{String(value)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
             </div>
-            Follow-up
-          </h4>
-          <div className="grid grid-cols-3 gap-6">
-            <div>
-              <span className="mb-1 block text-[11px] font-semibold text-slate-500">Last Contacted</span>
-              <p className="text-sm font-semibold text-slate-900 dark:text-white">{selectedLead.updated_at ? formatDate(selectedLead.updated_at) : "N/A"}</p>
+          </details>
+
+          <details className="group mt-4 rounded-xl border border-white/20 bg-white/50 dark:border-white/10 dark:bg-white/5 overflow-hidden">
+            <summary className="cursor-pointer list-none flex items-center justify-between p-4 font-semibold text-slate-800 dark:text-slate-200 hover:bg-white/40 dark:hover:bg-white/10 transition">
+              <span className="flex items-center gap-2"><Activity size={16} className="text-indigo-500" /> Activity Timeline</span>
+              <ChevronDown size={16} className="text-slate-500 transition-transform group-open:rotate-180" />
+            </summary>
+            <div className="p-4 border-t border-white/20 dark:border-white/10 bg-white/20 dark:bg-black/10">
+              <div className="animate-fade-in mt-2 space-y-4">
+                <p className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3">Conversation History</p>
+                <div className="relative pl-3 border-l-2 border-white/20 dark:border-white/10 space-y-6">
+                  {activityLoading ? (
+                    <div className="py-4 text-xs font-semibold text-slate-500">
+                      <Loader2 size={14} className="mr-2 inline animate-spin" />
+                      Loading timeline
+                    </div>
+                  ) : activities.length ? (
+                    activities.map((activity) => (
+                      <div className="relative" key={activity.id}>
+                        <div className={`absolute -left-[19px] top-1 h-3 w-3 rounded-full ring-4 ring-white dark:ring-slate-900 ${activity.item_type === "message" ? "bg-emerald-500" : "bg-brand-500"}`} />
+                        <p className="text-[10px] font-bold text-slate-400">{formatDate(activity.created_at)}</p>
+                        <p className="mt-1 text-sm font-semibold capitalize text-slate-800 dark:text-slate-100">
+                          {(activity.title || activity.activity_type || activity.item_type).replace(/_/g, " ")}
+                        </p>
+                        <div className="mt-2 rounded-xl bg-white/50 p-3 text-xs text-slate-600 dark:bg-white/5 dark:text-slate-300">
+                          <span className="mr-2 font-bold text-brand-600 dark:text-brand-400">
+                            {activity.platform || activity.direction || "Activity"}:
+                          </span>
+                          {activity.content || "No notes recorded."}
+                          {activity.due_at ? (
+                            <p className="mt-2 font-semibold text-amber-600 dark:text-amber-300">Due {formatDate(activity.due_at)}</p>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="relative">
+                      <div className="absolute -left-[19px] top-1 h-3 w-3 rounded-full bg-slate-300 ring-4 ring-white dark:bg-slate-700 dark:ring-slate-900" />
+                      <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">No activity yet</p>
+                    </div>
+                  )}
+                </div>
+                 
+                <div className="mt-8">
+                  <div className="mb-2 grid grid-cols-2 gap-2">
+                    <ThemedSelect
+                      value={activityPlatform}
+                      onChange={setActivityPlatform}
+                      icon={MessageSquare}
+                      placeholder="Platform"
+                      options={[
+                        { value: "phone", label: "Phone" },
+                        { value: "whatsapp", label: "WhatsApp" },
+                        { value: "messenger", label: "Messenger" },
+                        { value: "website", label: "Web Widget" },
+                      ]}
+                    />
+                    <input
+                      type="date"
+                      value={followUpDate}
+                      onChange={(event) => setFollowUpDate(event.target.value)}
+                      className="h-11 rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-700 outline-none dark:border-white/10 dark:bg-black/20 dark:text-slate-200"
+                    />
+                  </div>
+                  <textarea 
+                    value={activityNote}
+                    onChange={(event) => setActivityNote(event.target.value)}
+                    className="w-full rounded-xl border border-white/50 bg-white/50 p-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+                    placeholder="Type a new message or log a call..."
+                    rows={3}
+                  />
+                  <div className="mt-2 flex gap-2">
+                    <button type="button" onClick={() => void createLeadActivity("call")} disabled={!activityNote.trim()} className="flex-1 rounded-xl bg-brand-600 py-2.5 text-xs font-bold text-white transition hover:bg-brand-500 disabled:opacity-50">Log Call</button>
+                    <button type="button" onClick={() => void createLeadActivity("message")} disabled={!activityNote.trim()} className="flex-1 rounded-xl bg-indigo-600 py-2.5 text-xs font-bold text-white transition hover:bg-indigo-500 disabled:opacity-50">Save Message</button>
+                    <button type="button" onClick={() => void createLeadActivity("follow_up")} disabled={!activityNote.trim() || !followUpDate} className="flex-1 rounded-xl bg-amber-500 py-2.5 text-xs font-bold text-white transition hover:bg-amber-600 disabled:opacity-50">Follow-up</button>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div>
-              <span className="mb-1 block text-[11px] font-semibold text-slate-500">Next Follow-up</span>
-              <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                 {activities.find(a => a.due_at)?.due_at ? formatDate(activities.find(a => a.due_at)!.due_at!) : "N/A"}
-              </p>
+          </details>
+
+          <details className="group mt-4 rounded-xl border border-white/20 bg-white/50 dark:border-white/10 dark:bg-white/5 overflow-hidden">
+            <summary className="cursor-pointer list-none flex items-center justify-between p-4 font-semibold text-slate-800 dark:text-slate-200 hover:bg-white/40 dark:hover:bg-white/10 transition">
+              <span className="flex items-center gap-2"><Edit size={16} className="text-emerald-500" /> Edit Lead</span>
+              <ChevronDown size={16} className="text-slate-500 transition-transform group-open:rotate-180" />
+            </summary>
+            <div className="p-4 border-t border-white/20 dark:border-white/10 bg-white/20 dark:bg-black/10">
+              <form
+                className="space-y-3"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const form = new FormData(event.currentTarget);
+                  const stageId = String(form.get("lead_stage_id") || "");
+                  void updateLead(selectedLead.id, {
+                    company_name: String(form.get("company_name") || selectedLead.company_name),
+                    contact_person: String(form.get("contact_person") || "") || null,
+                    phone: String(form.get("phone") || "") || null,
+                    email: String(form.get("email") || "") || null,
+                    priority: String(form.get("priority") || "medium"),
+                    lead_stage_id: stageId || null,
+                    lead_area_id: String(form.get("lead_area_id") || "") || null,
+                    lead_profession_id: String(form.get("lead_profession_id") || "") || null,
+                    assigned_user_id: String(form.get("assigned_user_id") || "") || null,
+                    tags: editTags,
+                    ai_instructions: aiInstructions || null,
+                    status: configs.stages.find((stage) => stage.id === stageId)?.name.toLowerCase().replace(/\s+/g, "_") || selectedLead.status,
+                  });
+                }}
+              >
+                <label className="block">
+                  <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Company Name</span>
+                  <input name="company_name" defaultValue={selectedLead.company_name} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+                </label>
+                <label className="block">
+                  <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Contact Person</span>
+                  <input name="contact_person" defaultValue={selectedLead.contact_person ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+                </label>
+                <label className="block">
+                  <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Phone</span>
+                  <input name="phone" defaultValue={selectedLead.phone ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+                </label>
+                <label className="block">
+                  <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Email</span>
+                  <input name="email" defaultValue={selectedLead.email ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block">
+                    <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Priority</span>
+                    <UncontrolledThemedSelect
+                      name="priority"
+                      defaultValue={selectedLead.priority ?? "medium"}
+                      placeholder="Priority"
+                      icon={Zap}
+                      options={[
+                        { value: "high", label: "High" },
+                        { value: "medium", label: "Medium" },
+                        { value: "low", label: "Low" },
+                      ]}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Stage</span>
+                    <UncontrolledThemedSelect
+                      name="lead_stage_id"
+                      defaultValue={selectedLead.lead_stage_id ?? ""}
+                      placeholder="Stage"
+                      icon={Filter}
+                      options={[{ value: "", label: "No Stage" }, ...configs.stages.map((stage) => ({ value: stage.id, label: stage.name }))]}
+                    />
+                  </label>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block">
+                    <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Area</span>
+                    <UncontrolledThemedSelect
+                      name="lead_area_id"
+                      defaultValue={selectedLead.lead_area_id ?? ""}
+                      placeholder="Area"
+                      icon={Globe}
+                      options={[{ value: "", label: "No Area" }, ...configs.areas.map((area) => ({ value: area.id, label: area.name }))]}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Profession</span>
+                    <UncontrolledThemedSelect
+                      name="lead_profession_id"
+                      defaultValue={selectedLead.lead_profession_id ?? ""}
+                      placeholder="Profession"
+                      icon={User}
+                      options={[{ value: "", label: "No Profession" }, ...configs.professions.map((profession) => ({ value: profession.id, label: profession.name }))]}
+                    />
+                  </label>
+                </div>
+                <label className="block">
+                  <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Assigned To</span>
+                  <UncontrolledThemedSelect
+                    name="assigned_user_id"
+                    defaultValue={selectedLead.assigned_user_id ?? ""}
+                    placeholder="Unassigned"
+                    icon={User}
+                    options={[{ value: "", label: "Unassigned" }, ...users.map((u) => ({ value: u.id, label: u.name || u.email || u.id }))]}
+                  />
+                </label>
+                <div className="rounded-2xl border border-white/20 bg-white/30 p-4 dark:border-white/10 dark:bg-white/5">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase text-slate-500">Tags</span>
+                    <span className="text-[10px] text-slate-400">Press Enter or comma to add</span>
+                  </div>
+                  <input
+                    value={editTagInput}
+                    onChange={(event) => setEditTagInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === ",") {
+                        event.preventDefault();
+                        addEditTags(editTagInput);
+                        setEditTagInput("");
+                      }
+                    }}
+                    className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+                    placeholder="vip, hot, follow-up"
+                  />
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {editTags.length ? (
+                      editTags.map((tag) => (
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={() => setEditTags((current) => current.filter((item) => item !== tag))}
+                          className="flex items-center gap-1 rounded-full bg-brand-500/10 px-3 py-1 text-[11px] font-semibold text-brand-600 transition hover:bg-brand-500/20 dark:text-brand-300"
+                        >
+                          {tagLabel(tag)}
+                          <X size={12} />
+                        </button>
+                      ))
+                    ) : (
+                      <span className="text-xs text-slate-400">No tags yet</span>
+                    )}
+                  </div>
+                </div>
+                <label className="block">
+                  <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">AI Instructions</span>
+                  <textarea value={aiInstructions} onChange={(event) => setAiInstructions(event.target.value)} rows={4} className="w-full rounded-xl border border-white/50 bg-white/50 px-3 py-2 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+                </label>
+                <div className="flex gap-2">
+                  <button type="submit" disabled={savingId === selectedLead.id} className="flex-1 rounded-xl bg-brand-600 py-2.5 text-sm font-bold text-white shadow-glow transition hover:bg-brand-500 disabled:opacity-60">
+                    Save Changes
+                  </button>
+                  <button type="button" onClick={() => deleteLead(selectedLead.id)} className="h-11 rounded-xl bg-rose-500/10 px-4 text-sm font-semibold text-rose-600 hover:bg-rose-500/20 dark:text-rose-400">
+                    Delete
+                  </button>
+                </div>
+              </form>
             </div>
-            <div>
-              <span className="mb-1 block text-[11px] font-semibold text-slate-500">Converted</span>
-              <p className="text-sm font-semibold text-slate-900 dark:text-white">{selectedLead.converted_customer_id ? "Yes" : "N/A"}</p>
+          </details>
+
+            {/* Raw note audit trail */}
+            {selectedLead.raw_note && (
+              <details className="mt-3 rounded-xl border border-dashed border-slate-200/60 dark:border-white/10">
+                <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
+                  <FileText size={11} className="mr-1 inline" /> Raw Agent Note
+                </summary>
+                <p className="px-3 pb-3 pt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-400">{selectedLead.raw_note}</p>
+              </details>
+            )}
+
+            <div className="mt-5">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Move status</p>
+              <div className="grid grid-cols-2 gap-2">
+                {dynamicStages.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => void updateLead(selectedLead.id, item.id ? { lead_stage_id: item.id, status: item.key } : { status: item.key })}
+                    disabled={savingId === selectedLead.id || (item.id ? selectedLead.lead_stage_id === item.id : selectedLead.status === item.key)}
+                    className={`h-11 rounded-xl text-xs font-bold transition active:scale-95 disabled:opacity-50 sm:h-10 ${item.tone}`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div>
-              <span className="mb-1 block text-[11px] font-semibold text-slate-500">Lost</span>
-              <p className="text-sm font-semibold text-slate-900 dark:text-white">{selectedLead.status === "lost" ? "Yes" : "N/A"}</p>
-            </div>
-            <div className="col-span-2">
-              <span className="mb-1 block text-[11px] font-semibold text-slate-500">Remarks</span>
-              <p className="text-sm font-semibold text-slate-900 dark:text-white">{selectedLead.raw_note || "Nothing"}</p>
-            </div>
-            <div className="col-span-3">
-              <span className="mb-1 block text-[11px] font-semibold text-slate-500">Lost Reason</span>
-              <p className="text-sm font-semibold text-rose-500">N/A</p>
+
+            <div className="mt-5 grid gap-2">
+              <button
+                type="button"
+                disabled={savingId === selectedLead.id || Boolean(selectedLead.converted_customer_id)}
+                onClick={() => {
+                  if (selectedLead.converted_customer_id) return;
+                  setBudgetInput("");
+                  setBudgetModalLeadId(selectedLead.id);
+                }}
+                className="flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-500 text-sm font-semibold text-white transition hover:bg-emerald-600 active:scale-95 disabled:opacity-60"
+              >
+                {savingId === selectedLead.id ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
+                {selectedLead.converted_customer_id ? "Converted Γ£ô" : "Convert to Customer"}
+              </button>
             </div>
           </div>
         </div>
-      </div>
-    );
-  }
+      );
+    }
 
     return (
       <ProtectedPage>
@@ -900,7 +1185,7 @@ export default function LeadsPage() {
           </p>
         ) : null}
 
-        {/* Stats — admins see global analytics, agents see only their assigned count */}
+        {/* Stats ΓÇö admins see global analytics, agents see only their assigned count */}
         {currentUser?.role === "admin" ? (
           <div className="mb-5 grid grid-cols-1 gap-3 min-[430px]:grid-cols-2 xl:grid-cols-4">
             <div className="glass-card p-4">
@@ -1556,7 +1841,7 @@ export default function LeadsPage() {
                         </td>
                         <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">{lead.phone || "-"}</td>
                         <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300 capitalize">
-                           {(lead.industry_data as any)?.profession || lead.industry || "—"}
+                           {(lead.industry_data as any)?.profession || lead.industry || "ΓÇö"}
                         </td>
                         <td className="px-5 py-4">
                           <span className={`rounded-lg px-2.5 py-1 text-[11px] font-bold ${stageTone(configs.stages.find((item) => item.id === lead.lead_stage_id)?.name, lead.status)}`}>
@@ -1575,19 +1860,6 @@ export default function LeadsPage() {
                                 <Trash2 size={16} />
                               </button>
                             )}
-                            <div className="relative">
-                              <button onClick={(e) => { e.stopPropagation(); setActionDropdownId(actionDropdownId === lead.id ? null : lead.id) }} className="rounded p-1.5 hover:bg-white/60 hover:text-emerald-500 dark:hover:bg-white/10">
-                                <Edit2 size={16} />
-                              </button>
-                              {actionDropdownId === lead.id && (
-                                <div className="absolute right-0 top-full mt-1 w-40 rounded-xl bg-white shadow-xl border border-slate-100 dark:bg-slate-800 dark:border-slate-700 z-50 overflow-hidden text-left" onMouseLeave={() => setActionDropdownId(null)}>
-                                  <button onClick={(e) => { e.stopPropagation(); setEditModalLeadId(lead.id); setActionDropdownId(null); }} className="w-full text-left px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700 flex items-center gap-2"><Edit2 size={14} /> Edit Lead</button>
-                                  {currentUser?.role === "admin" && (
-                                    <button onClick={(e) => { e.stopPropagation(); setBudgetModalLeadId(lead.id); setActionDropdownId(null); }} className="w-full text-left px-4 py-2 text-sm font-semibold text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 flex items-center gap-2"><CheckCircle2 size={14} /> Convert</button>
-                                  )}
-                                </div>
-                              )}
-                            </div>
                           </div>
                         </td>
                       </tr>
@@ -1610,12 +1882,7 @@ export default function LeadsPage() {
             >
               {/* Header with sticky close button */}
               <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/10 bg-white/20 px-6 py-4 backdrop-blur-xl dark:bg-white/5">
-                 <div>
-                   <h3 className="flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-200">
-                     <Smartphone size={16} /> Lead Details - {selectedLead.id.substring(0, 8).toUpperCase()}
-                   </h3>
-                   <p className="mt-1 text-[10px] text-slate-500">Created by {users.find(u => u.id === selectedLead.assigned_user_id)?.name || "Super Admin"} | {formatDate(selectedLead.created_at)}</p>
-                 </div>
+                 <h3 className="text-sm font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">Lead Profile</h3>
                  <button 
                   onClick={() => setSelectedId(null)}
                   className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-200 dark:hover:bg-white/10"
@@ -1633,174 +1900,7 @@ export default function LeadsPage() {
         </div>
       </section>
 
-
-      {editModalLeadId && (() => {
-        const selectedLead = leads.find(l => l.id === editModalLeadId);
-        if (!selectedLead) return null;
-        return (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/40 backdrop-blur-sm">
-            <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl border border-white/20 bg-white shadow-2xl dark:bg-slate-900 animate-fade-up">
-              <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white/80 px-6 py-4 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/80">
-                <div>
-                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">Edit Lead</h2>
-                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{selectedLead.company_name}</p>
-                </div>
-                <button onClick={() => setEditModalLeadId(null)} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10">
-                  <X size={16} />
-                </button>
-              </div>
-              <div className="p-6">
-                <form
-                  className="space-y-3"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    const form = new FormData(event.currentTarget);
-                    const stageId = String(form.get("lead_stage_id") || "");
-                    void updateLead(selectedLead.id, {
-                      company_name: String(form.get("company_name") || selectedLead.company_name),
-                      contact_person: String(form.get("contact_person") || "") || null,
-                      phone: String(form.get("phone") || "") || null,
-                      email: String(form.get("email") || "") || null,
-                      priority: String(form.get("priority") || "medium"),
-                      lead_stage_id: stageId || null,
-                      lead_area_id: String(form.get("lead_area_id") || "") || null,
-                      lead_profession_id: String(form.get("lead_profession_id") || "") || null,
-                      assigned_user_id: String(form.get("assigned_user_id") || "") || null,
-                      tags: editTags,
-                      ai_instructions: aiInstructions || null,
-                      status: configs.stages.find((stage) => stage.id === stageId)?.name.toLowerCase().replace(/\s+/g, "_") || selectedLead.status,
-                    });
-                  }}
-                >
-                  <label className="block">
-                    <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Company Name</span>
-                    <input name="company_name" defaultValue={selectedLead.company_name} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
-                  </label>
-                  <label className="block">
-                    <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Contact Person</span>
-                    <input name="contact_person" defaultValue={selectedLead.contact_person ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
-                  </label>
-                  <label className="block">
-                    <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Phone</span>
-                    <input name="phone" defaultValue={selectedLead.phone ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
-                  </label>
-                  <label className="block">
-                    <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Email</span>
-                    <input name="email" defaultValue={selectedLead.email ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="block">
-                      <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Priority</span>
-                      <UncontrolledThemedSelect
-                        name="priority"
-                        defaultValue={selectedLead.priority ?? "medium"}
-                        placeholder="Priority"
-                        icon={Zap}
-                        options={[
-                          { value: "high", label: "High" },
-                          { value: "medium", label: "Medium" },
-                          { value: "low", label: "Low" },
-                        ]}
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Stage</span>
-                      <UncontrolledThemedSelect
-                        name="lead_stage_id"
-                        defaultValue={selectedLead.lead_stage_id ?? ""}
-                        placeholder="Stage"
-                        icon={Filter}
-                        options={[{ value: "", label: "No Stage" }, ...configs.stages.map((stage) => ({ value: stage.id, label: stage.name }))]}
-                      />
-                    </label>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="block">
-                      <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Area</span>
-                      <UncontrolledThemedSelect
-                        name="lead_area_id"
-                        defaultValue={selectedLead.lead_area_id ?? ""}
-                        placeholder="Area"
-                        icon={Globe}
-                        options={[{ value: "", label: "No Area" }, ...configs.areas.map((area) => ({ value: area.id, label: area.name }))]}
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Profession</span>
-                      <UncontrolledThemedSelect
-                        name="lead_profession_id"
-                        defaultValue={selectedLead.lead_profession_id ?? ""}
-                        placeholder="Profession"
-                        icon={User}
-                        options={[{ value: "", label: "No Profession" }, ...configs.professions.map((profession) => ({ value: profession.id, label: profession.name }))]}
-                      />
-                    </label>
-                  </div>
-                  <label className="block">
-                    <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Assigned To</span>
-                    <UncontrolledThemedSelect
-                      name="assigned_user_id"
-                      defaultValue={selectedLead.assigned_user_id ?? ""}
-                      placeholder="Unassigned"
-                      icon={User}
-                      options={[{ value: "", label: "Unassigned" }, ...users.map((u) => ({ value: u.id, label: u.name || u.email || u.id }))]}
-                    />
-                  </label>
-                  <div className="rounded-2xl border border-white/20 bg-white/30 p-4 dark:border-white/10 dark:bg-white/5">
-                    <div className="mb-2 flex items-center justify-between">
-                      <span className="text-[11px] font-bold uppercase text-slate-500">Tags</span>
-                      <span className="text-[10px] text-slate-400">Press Enter or comma to add</span>
-                    </div>
-                    <input
-                      value={editTagInput}
-                      onChange={(event) => setEditTagInput(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === ",") {
-                          event.preventDefault();
-                          addEditTags(editTagInput);
-                          setEditTagInput("");
-                        }
-                      }}
-                      className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
-                      placeholder="vip, hot, follow-up"
-                    />
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {editTags.length ? (
-                        editTags.map((tag) => (
-                          <button
-                            key={tag}
-                            type="button"
-                            onClick={() => setEditTags((current) => current.filter((item) => item !== tag))}
-                            className="flex items-center gap-1 rounded-full bg-brand-500/10 px-3 py-1 text-[11px] font-semibold text-brand-600 transition hover:bg-brand-500/20 dark:text-brand-300"
-                          >
-                            {tagLabel(tag)}
-                            <X size={12} />
-                          </button>
-                        ))
-                      ) : (
-                        <span className="text-xs text-slate-400">No tags yet</span>
-                      )}
-                    </div>
-                  </div>
-                  <label className="block">
-                    <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">AI Instructions</span>
-                    <textarea value={aiInstructions} onChange={(event) => setAiInstructions(event.target.value)} rows={4} className="w-full rounded-xl border border-white/50 bg-white/50 px-3 py-2 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
-                  </label>
-                  <div className="flex gap-2">
-                    <button type="submit" disabled={savingId === selectedLead.id} className="flex-1 rounded-xl bg-brand-600 py-2.5 text-sm font-bold text-white shadow-glow transition hover:bg-brand-500 disabled:opacity-60">
-                      Save Changes
-                    </button>
-                    <button type="button" onClick={() => deleteLead(selectedLead.id)} className="h-11 rounded-xl bg-rose-500/10 px-4 text-sm font-semibold text-rose-600 hover:bg-rose-500/20 dark:text-rose-400">
-                      Delete
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-{budgetModalLeadId && (() => {
+      {budgetModalLeadId && (() => {
         const lead = leads.find(l => l.id === budgetModalLeadId);
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/40 backdrop-blur-sm">
@@ -1814,7 +1914,7 @@ export default function LeadsPage() {
               </div>
               <div className="rounded-xl bg-emerald-50/80 dark:bg-emerald-500/10 border border-emerald-200/50 dark:border-emerald-500/20 p-3 mb-4">
                 <p className="text-xs text-emerald-700 dark:text-emerald-300 leading-relaxed">
-                  This will create a <strong>Customer</strong>, an <strong>Opportunity</strong> in Discovery stage, and a <strong>draft Invoice</strong> — all linked to this lead.
+                  This will create a <strong>Customer</strong>, an <strong>Opportunity</strong> in Discovery stage, and a <strong>draft Invoice</strong> ΓÇö all linked to this lead.
                 </p>
               </div>
               <div className="mb-4">
@@ -1849,14 +1949,14 @@ export default function LeadsPage() {
             </div>
             <div className="rounded-xl bg-white/60 dark:bg-white/5 border border-white/30 dark:border-white/10 p-4 mb-3">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-2">New Customer</p>
-              <p className="font-bold text-slate-900 dark:text-white">{(invoiceModal.customer as unknown as Record<string, string>)?.company_name ?? "—"}</p>
+              <p className="font-bold text-slate-900 dark:text-white">{(invoiceModal.customer as unknown as Record<string, string>)?.company_name ?? "ΓÇö"}</p>
               <p className="text-xs text-slate-500">{(invoiceModal.customer as unknown as Record<string, string>)?.contact_person ?? ""}</p>
             </div>
             {invoiceModal.invoice && (
               <div className="rounded-xl bg-brand-50/60 dark:bg-brand-500/10 border border-brand-200/50 dark:border-brand-500/20 p-4 mb-4">
                 <div className="flex items-center gap-2 mb-3"><FileText size={14} className="text-brand-600 dark:text-brand-400" /><p className="text-[11px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">Draft Invoice Created</p></div>
                 <div className="space-y-1.5 text-sm">
-                  <div className="flex justify-between"><span className="text-slate-500">Invoice ID</span><span className="font-mono text-xs font-semibold text-slate-700 dark:text-slate-200">{invoiceModal.invoice.id.slice(0, 12)}…</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Invoice ID</span><span className="font-mono text-xs font-semibold text-slate-700 dark:text-slate-200">{invoiceModal.invoice.id.slice(0, 12)}ΓÇª</span></div>
                   <div className="flex justify-between"><span className="text-slate-500">Amount</span><span className="font-bold text-brand-600 dark:text-brand-400">{invoiceModal.invoice.currency} {invoiceModal.invoice.total_amount.toLocaleString()}</span></div>
                   <div className="flex justify-between"><span className="text-slate-500">Payment Status</span><span className="rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">{invoiceModal.invoice.payment_status}</span></div>
                   <div className="flex justify-between"><span className="text-slate-500">Pipeline Stage</span><span className="rounded-md bg-blue-100 px-2 py-0.5 text-[10px] font-bold uppercase text-blue-700 dark:bg-blue-500/20 dark:text-blue-300">Discovery</span></div>
