@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowRight,
@@ -147,7 +147,7 @@ function apiDate(value: string, endOfDay = false) {
   return `${value}T${endOfDay ? "23:59:59" : "00:00:00"}`;
 }
 
-export default function LeadsPage() {
+function LeadsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -183,6 +183,9 @@ export default function LeadsPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [phoneWarning, setPhoneWarning] = useState<string | null>(null);
+  const [editPhone, setEditPhone] = useState("");
+  const [editPhoneWarning, setEditPhoneWarning] = useState<string | null>(null);
 
   const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
   // Industry-specific data extracted by AI or entered manually
@@ -363,6 +366,66 @@ export default function LeadsPage() {
       setSelectedId(leadId);
     }
   }, [searchParams, selectedId]);
+
+  // Real-time phone check for Create Modal
+  useEffect(() => {
+    if (!phone || !phone.trim()) {
+      setPhoneWarning(null);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await apiRequest<{ available: boolean; existing_name: string | null }>(
+          `/leads/check-phone?phone=${encodeURIComponent(phone.trim())}`
+        );
+        if (!res.available) {
+          setPhoneWarning(`Lead with this phone number already exists: ${res.existing_name}`);
+        } else {
+          setPhoneWarning(null);
+        }
+      } catch (err) {
+        setPhoneWarning(null);
+      }
+    }, 500); // 500ms debounce
+    return () => clearTimeout(timer);
+  }, [phone]);
+
+  // Sync editPhone when editModalLeadId changes
+  useEffect(() => {
+    if (editModalLeadId) {
+      const lead = leads.find((l) => l.id === editModalLeadId);
+      if (lead) {
+        setEditPhone(lead.phone || "");
+      }
+      setEditPhoneWarning(null);
+    } else {
+      setEditPhone("");
+      setEditPhoneWarning(null);
+    }
+  }, [editModalLeadId, leads]);
+
+  // Real-time phone check for Edit Modal
+  useEffect(() => {
+    if (!editPhone || !editPhone.trim() || !editModalLeadId) {
+      setEditPhoneWarning(null);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await apiRequest<{ available: boolean; existing_name: string | null }>(
+          `/leads/check-phone?phone=${encodeURIComponent(editPhone.trim())}&exclude_lead_id=${editModalLeadId}`
+        );
+        if (!res.available) {
+          setEditPhoneWarning(`Lead with this phone number already exists: ${res.existing_name}`);
+        } else {
+          setEditPhoneWarning(null);
+        }
+      } catch (err) {
+        setEditPhoneWarning(null);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [editPhone, editModalLeadId]);
 
   async function loadConfigs() {
     try {
@@ -590,6 +653,7 @@ export default function LeadsPage() {
       setLeads((current) => current.map((lead) => lead.id === updated.id ? updated : lead));
       await loadLeads();
       setError(null);
+      setEditModalLeadId(null);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -606,6 +670,7 @@ export default function LeadsPage() {
       await apiRequest(`/leads/${leadId}`, { method: "DELETE" });
       await loadLeads();
       setSelectedId((current) => current === leadId ? null : current);
+      setEditModalLeadId(null);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -846,7 +911,7 @@ export default function LeadsPage() {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setCreateLeadOpen(true)}
+              onClick={() => { setError(null); setCreateLeadOpen(true); }}
               className="flex h-11 items-center gap-2 rounded-xl bg-brand-600 px-4 text-sm font-bold text-white shadow-glow transition hover:bg-brand-500 sm:h-10"
             >
               <Plus size={16} />
@@ -965,12 +1030,17 @@ export default function LeadsPage() {
               <form onSubmit={createLead} className="overflow-hidden">
                 <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/10 bg-white/20 px-6 py-4 backdrop-blur-xl dark:bg-white/5">
                   <h3 className="text-sm font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">Create New Lead</h3>
-                  <button type="button" onClick={() => setCreateLeadOpen(false)} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-200 dark:hover:bg-white/10 dark:text-slate-400">
+                  <button type="button" onClick={() => { setError(null); setCreateLeadOpen(false); }} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-200 dark:hover:bg-white/10 dark:text-slate-400">
                     <X size={20} />
                   </button>
                 </div>
 
           <div className="p-6">
+            {error ? (
+              <p className="mb-4 rounded-xl border border-rose-200 bg-rose-50/80 px-4 py-3 text-sm text-rose-700 backdrop-blur-md dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300">
+                {error}
+              </p>
+            ) : null}
             <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
               {/* Identity Section */}
               <div className="space-y-4">
@@ -1014,6 +1084,11 @@ export default function LeadsPage() {
                       placeholder="Phone Number"
                     />
                   </label>
+                  {phoneWarning && (
+                    <p className="text-[11px] font-semibold text-rose-500 mt-1 dark:text-rose-400">
+                      ⚠️ {phoneWarning}
+                    </p>
+                  )}
                   <label className="relative block">
                     <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
                     <input
@@ -1302,7 +1377,7 @@ export default function LeadsPage() {
               </div>
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || !!phoneWarning}
                 className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-indigo-600 px-8 text-sm font-bold text-white shadow-glow transition hover:from-brand-600 hover:to-indigo-700 active:scale-[0.98] disabled:opacity-60 sm:w-auto"
               >
                 <Plus size={18} />
@@ -1581,7 +1656,7 @@ export default function LeadsPage() {
                               </button>
                               {actionDropdownId === lead.id && (
                                 <div className="absolute right-0 top-full mt-1 w-40 rounded-xl bg-white shadow-xl border border-slate-100 dark:bg-slate-800 dark:border-slate-700 z-50 overflow-hidden text-left" onMouseLeave={() => setActionDropdownId(null)}>
-                                  <button onClick={(e) => { e.stopPropagation(); setEditModalLeadId(lead.id); setActionDropdownId(null); }} className="w-full text-left px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700 flex items-center gap-2"><Edit2 size={14} /> Edit Lead</button>
+                                  <button onClick={(e) => { e.stopPropagation(); setError(null); setEditModalLeadId(lead.id); setActionDropdownId(null); }} className="w-full text-left px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700 flex items-center gap-2"><Edit2 size={14} /> Edit Lead</button>
                                   {currentUser?.role === "admin" && (
                                     <button onClick={(e) => { e.stopPropagation(); setBudgetModalLeadId(lead.id); setActionDropdownId(null); }} className="w-full text-left px-4 py-2 text-sm font-semibold text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 flex items-center gap-2"><CheckCircle2 size={14} /> Convert</button>
                                   )}
@@ -1645,11 +1720,16 @@ export default function LeadsPage() {
                   <h2 className="text-lg font-bold text-slate-900 dark:text-white">Edit Lead</h2>
                   <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{selectedLead.company_name}</p>
                 </div>
-                <button onClick={() => setEditModalLeadId(null)} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10">
+                <button onClick={() => { setError(null); setEditModalLeadId(null); }} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10">
                   <X size={16} />
                 </button>
               </div>
               <div className="p-6">
+                {error ? (
+                  <p className="mb-4 rounded-xl border border-rose-200 bg-rose-50/80 px-4 py-3 text-sm text-rose-700 backdrop-blur-md dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300">
+                    {error}
+                  </p>
+                ) : null}
                 <form
                   className="space-y-3"
                   onSubmit={(event) => {
@@ -1682,7 +1762,17 @@ export default function LeadsPage() {
                   </label>
                   <label className="block">
                     <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Phone</span>
-                    <input name="phone" defaultValue={selectedLead.phone ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+                    <input
+                      name="phone"
+                      value={editPhone}
+                      onChange={(e) => setEditPhone(e.target.value)}
+                      className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+                    />
+                    {editPhoneWarning && (
+                      <p className="text-[11px] font-semibold text-rose-500 mt-1 dark:text-rose-400">
+                        ⚠️ {editPhoneWarning}
+                      </p>
+                    )}
                   </label>
                   <label className="block">
                     <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Email</span>
@@ -1787,7 +1877,7 @@ export default function LeadsPage() {
                     <textarea value={aiInstructions} onChange={(event) => setAiInstructions(event.target.value)} rows={4} className="w-full rounded-xl border border-white/50 bg-white/50 px-3 py-2 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
                   </label>
                   <div className="flex gap-2">
-                    <button type="submit" disabled={savingId === selectedLead.id} className="flex-1 rounded-xl bg-brand-600 py-2.5 text-sm font-bold text-white shadow-glow transition hover:bg-brand-500 disabled:opacity-60">
+                    <button type="submit" disabled={savingId === selectedLead.id || !!editPhoneWarning} className="flex-1 rounded-xl bg-brand-600 py-2.5 text-sm font-bold text-white shadow-glow transition hover:bg-brand-500 disabled:opacity-60">
                       Save Changes
                     </button>
                     <button type="button" onClick={() => deleteLead(selectedLead.id)} className="h-11 rounded-xl bg-rose-500/10 px-4 text-sm font-semibold text-rose-600 hover:bg-rose-500/20 dark:text-rose-400">
@@ -1928,5 +2018,17 @@ export default function LeadsPage() {
       })()}
 
     </ProtectedPage>
+  );
+}
+
+export default function LeadsPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex h-screen items-center justify-center">
+        <Loader2 className="animate-spin text-brand-500" size={32} />
+      </div>
+    }>
+      <LeadsContent />
+    </Suspense>
   );
 }

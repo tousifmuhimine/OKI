@@ -214,6 +214,21 @@ async def create_lead(
     if "tags" in data:
         data["tags"] = _normalize_tags(data.get("tags"))
     await _validate_config_ids(data, session)
+
+    # Validate phone uniqueness for registration
+    phone = data.get("phone")
+    if phone and phone.strip():
+        phone_stripped = phone.strip()
+        q = select(Lead).where(Lead.phone == phone_stripped)
+        res = await session.execute(q)
+        existing = res.scalars().first()
+        if existing:
+            existing_name = existing.company_name or existing.contact_person or "Unnamed Lead"
+            raise HTTPException(
+                status_code=400,
+                detail=f"Lead with this phone number already exists: {existing_name}",
+            )
+
     entity = Lead(**data)
     if not entity.assigned_user_id:
         entity.assigned_user_id = auth.user_id
@@ -317,6 +332,30 @@ async def create_lead_from_conversation(
     return LeadOut.model_validate(lead)
 
 
+@router.get("/check-phone")
+async def check_phone_unique(
+    phone: str = Query(..., min_length=1),
+    exclude_lead_id: str | None = Query(default=None),
+    _: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+):
+    phone_stripped = phone.strip()
+    if not phone_stripped:
+        return {"available": True, "existing_name": None}
+    
+    filters = [Lead.phone == phone_stripped]
+    if exclude_lead_id:
+        filters.append(Lead.id != exclude_lead_id)
+        
+    q = select(Lead).where(*filters)
+    res = await session.execute(q)
+    existing = res.scalars().first()
+    if existing:
+        existing_name = existing.company_name or existing.contact_person or "Unnamed Lead"
+        return {"available": False, "existing_name": existing_name}
+    return {"available": True, "existing_name": None}
+
+
 @router.get("/{lead_id}", response_model=LeadOut)
 async def get_lead(
     lead_id: str,
@@ -345,6 +384,20 @@ async def update_lead(
     if "tags" in changes:
         changes["tags"] = _normalize_tags(changes.get("tags"))
     await _validate_config_ids(changes, session)
+
+    if "phone" in changes:
+        phone = changes.get("phone")
+        if phone and phone.strip():
+            phone_stripped = phone.strip()
+            q = select(Lead).where(Lead.phone == phone_stripped, Lead.id != lead_id)
+            res = await session.execute(q)
+            existing = res.scalars().first()
+            if existing:
+                existing_name = existing.company_name or existing.contact_person or "Unnamed Lead"
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Lead with this phone number already exists: {existing_name}",
+                )
 
     previous_status = lead.status
     for key, value in changes.items():

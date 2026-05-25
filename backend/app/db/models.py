@@ -456,4 +456,4 @@ class Organization(Base, TimestampMixin):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
     company_name: Mapped[str] = mapped_column(String(255), index=True)
     allow_public_shares: Mapped[bool] = mapped_column(Boolean, default=True)
-    default_share_expiry_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    default_share_expiry_days: Mapped[int] = mapped_column(Integer, nullable=True)

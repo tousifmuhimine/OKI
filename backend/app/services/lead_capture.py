@@ -13,17 +13,33 @@ async def upsert_lead_from_inbound_message(
     channel_type: str,
     capture_source: str,
 ) -> Lead:
-    existing = (
-        await session.execute(
-            select(Lead)
-            .where(
-                Lead.contact_id == contact.id,
-                Lead.converted_customer_id.is_(None),
+    existing = None
+    if contact.phone and contact.phone.strip():
+        phone_stripped = contact.phone.strip()
+        existing = (
+            await session.execute(
+                select(Lead)
+                .where(
+                    Lead.phone == phone_stripped,
+                    Lead.converted_customer_id.is_(None),
+                )
+                .order_by(Lead.updated_at.desc())
+                .limit(1)
             )
-            .order_by(Lead.updated_at.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
+        ).scalar_one_or_none()
+
+    if not existing:
+        existing = (
+            await session.execute(
+                select(Lead)
+                .where(
+                    Lead.contact_id == contact.id,
+                    Lead.converted_customer_id.is_(None),
+                )
+                .order_by(Lead.updated_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
 
     if existing:
         existing.inbox_id = inbox.id
