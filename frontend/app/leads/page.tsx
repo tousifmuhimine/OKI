@@ -507,13 +507,15 @@ function LeadsContent() {
     }
     apiRequest<{ id: string; role_code: string } | { id: string; role: string }>("/users/me")
       .then((user: any) => {
-        const role = user.role_code || user.role || "agent";
+        const rawRole = user.role_code || user.role || "agent";
+        const role = rawRole === "individual_agent" ? "agent" : rawRole;
         setCurrentUser({ role, id: user.id });
       })
       .catch(() => {
         getSupabaseClient().auth.getUser().then(({ data }) => {
           if (data.user) {
-            const role = data.user.user_metadata?.role || "agent";
+            const rawRole = data.user.user_metadata?.role || "agent";
+            const role = rawRole === "individual_agent" ? "agent" : rawRole;
             setCurrentUser({ role, id: data.user.id });
           }
         });

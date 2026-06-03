@@ -163,9 +163,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           try {
             const dbUser = await apiRequest<{ name: string | null; role_code: string | null }>("/organizations/users/me");
             if (dbUser.name) name = dbUser.name;
-            if (dbUser.role_code) role = dbUser.role_code;
+            if (dbUser.role_code) {
+              role = dbUser.role_code === "individual_agent" ? "agent" : dbUser.role_code;
+            }
           } catch {
-            if (user.user_metadata?.role) role = user.user_metadata.role;
+            if (user.user_metadata?.role) {
+              const rawRole = user.user_metadata.role;
+              role = rawRole === "individual_agent" ? "agent" : rawRole;
+            }
           }
 
           // Fetch permissions

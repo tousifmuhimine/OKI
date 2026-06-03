@@ -17,6 +17,15 @@ export function ProtectedPage({ children }: ProtectedPageProps) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    if (typeof window !== "undefined" && window.location.hash) {
+      const hash = window.location.hash.substring(1);
+      const params = new URLSearchParams(hash);
+      if (params.get("type") === "recovery" || hash.includes("type=recovery")) {
+        window.location.replace(`/auth/update-password#${hash}`);
+        return;
+      }
+    }
+
     let active = true;
 
     if (isDemoSessionActive()) {

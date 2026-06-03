@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { FormEvent, useState, useEffect } from "react";
 import { Lock, LogIn, Mail, Sparkles } from "lucide-react";
 
 import {
@@ -19,6 +19,16 @@ export default function AuthLoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.location.hash) {
+      const hash = window.location.hash.substring(1);
+      const params = new URLSearchParams(hash);
+      if (params.get("type") === "recovery" || hash.includes("type=recovery")) {
+        window.location.replace(`/auth/update-password#${hash}`);
+      }
+    }
+  }, []);
 
   function goToDashboard() {
     window.location.assign("/dashboard");

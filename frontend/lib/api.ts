@@ -46,9 +46,18 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   if (!response.ok) {
     let detail = `Request failed (${response.status})`;
     try {
-      const payload = (await response.json()) as { detail?: string };
+      const payload = (await response.json()) as { detail?: any };
       if (payload && payload.detail) {
-        detail = payload.detail;
+        if (typeof payload.detail === "string") {
+          detail = payload.detail;
+        } else if (Array.isArray(payload.detail)) {
+          detail = payload.detail.map((err: any) => {
+            const field = err.loc && err.loc.length > 1 ? err.loc.slice(1).join(".") : "";
+            return field ? `${field}: ${err.msg}` : err.msg;
+          }).join(", ");
+        } else {
+          detail = JSON.stringify(payload.detail);
+        }
       }
     } catch {
       try {
