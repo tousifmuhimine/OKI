@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Users, Plus, Mail, ShieldCheck, UserCircle, Trash2,
   RefreshCw, ChevronDown, BarChart2, CheckCircle, Clock,
-  AlertTriangle, X, Loader2, UserPlus, Crown,
+  AlertTriangle, X, Loader2, UserPlus, Crown, GitMerge, MapPin, Briefcase, Award, ChevronRight
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 import { ProtectedPage } from "@/components/protected-page";
@@ -15,43 +15,169 @@ type TeamUser = {
   id: string;
   email: string | null;
   name: string | null;
-  role: string | null;
-  created_at: string | null;
+  role_id: string;
+  role_code: string | null;
+  reports_to_id: string | null;
+  branch_id: string | null;
   permissions: string[];
   task_count: number;
   lead_count: number;
 };
 
-type TeamListResponse = {
-  data: TeamUser[];
-  total: number;
+type Branch = {
+  id: string;
+  name: string;
+  location: string | null;
 };
 
-const ROLE_PRESETS = ["supervisor", "agent"] as const;
+const ROLE_PRESETS = [
+  { code: "super_admin", label: "Super Admin" },
+  { code: "admin", label: "Admin" },
+  { code: "branch_admin", label: "Branch Admin" },
+  { code: "individual_agent", label: "Agent" },
+  { code: "employee", label: "Employee" }
+] as const;
 
 function roleColor(role: string | null) {
   switch (role) {
-    case "admin": return "bg-purple-500/15 text-purple-700 dark:text-purple-300";
-    case "supervisor": return "bg-amber-500/15 text-amber-700 dark:text-amber-300";
-    case "agent": return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300";
-    default: return "bg-slate-500/15 text-slate-600 dark:text-slate-400";
+    case "super_admin":
+    case "admin": return "bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/20";
+    case "branch_admin": return "bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/20";
+    case "supervisor": return "bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/20";
+    case "individual_agent":
+    case "agent": return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20";
+    case "employee": return "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/20";
+    default: return "bg-slate-500/15 text-slate-600 dark:text-slate-400 border border-slate-500/10";
   }
 }
 
+// ─── Recursive Tree Node Component ──────────────────────────────
+function TreeNode({
+  user,
+  allUsers,
+  level,
+  onSelectUser,
+  roleColor,
+  branches
+}: {
+  user: TeamUser;
+  allUsers: TeamUser[];
+  level: number;
+  onSelectUser: (u: TeamUser) => void;
+  roleColor: (role: string | null) => string;
+  branches: Branch[];
+}) {
+  const reportees = allUsers.filter(u => u.reports_to_id === user.id);
+  const [isOpen, setIsOpen] = useState(true);
+
+  const userBranchName = useMemo(() => {
+    return branches.find(b => b.id === user.branch_id)?.name || "All Branches";
+  }, [branches, user.branch_id]);
+
+  return (
+    <div className="relative my-3 pl-6 md:pl-10 border-l border-slate-200/60 dark:border-white/10">
+      {/* Visual horizontal connector line */}
+      <div className="absolute left-0 top-6 w-5 border-t border-slate-200/60 dark:border-white/10" />
+      
+      <div className="flex flex-wrap items-center justify-between gap-4 bg-white/40 dark:bg-black/20 backdrop-blur-md border border-white/30 dark:border-white/10 rounded-2xl p-4 hover:bg-white/80 dark:hover:bg-black/35 transition shadow-sm max-w-2xl animate-fade-in">
+        <div className="flex items-center gap-3">
+          {/* Avatar */}
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-400 to-indigo-500 text-[11px] font-bold text-white shadow-inner">
+            {(user.name || user.email || user.id)[0].toUpperCase()}
+          </div>
+
+          {/* Info */}
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
+                {user.name || "Unnamed"}
+              </p>
+              <span className={`rounded-md px-1.5 py-0.5 text-[9px] font-bold tracking-wider uppercase ${roleColor(user.role_code)}`}>
+                {user.role_code?.replace("_", " ") || "Employee"}
+              </span>
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+              <span className="flex items-center gap-1">
+                <Mail size={11} className="text-slate-400" />
+                {user.email}
+              </span>
+              <span className="flex items-center gap-1">
+                <MapPin size={11} className="text-slate-400" />
+                {userBranchName}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onSelectUser(user)}
+            className="rounded-xl bg-white/70 dark:bg-white/5 hover:bg-white dark:hover:bg-white/10 border border-white/50 dark:border-white/5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 transition"
+          >
+            Manage
+          </button>
+
+          {reportees.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setIsOpen(!isOpen)}
+              className="flex items-center gap-1 rounded-xl bg-brand-500/10 hover:bg-brand-500/20 px-3 py-1.5 text-xs font-semibold text-brand-700 dark:text-brand-300 transition"
+            >
+              {isOpen ? "Collapse" : `Expand (${reportees.length})`}
+              <ChevronDown size={12} className={`transform transition-transform ${isOpen ? "rotate-180" : ""}`} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {isOpen && reportees.length > 0 && (
+        <div className="mt-2 space-y-1">
+          {reportees.map(rep => (
+            <TreeNode
+              key={rep.id}
+              user={rep}
+              allUsers={allUsers}
+              level={level + 1}
+              onSelectUser={onSelectUser}
+              roleColor={roleColor}
+              branches={branches}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main Component ─────────────────────────────────────────────
 export default function TeamDataPage() {
   const [users, setUsers] = useState<TeamUser[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [currentUser, setCurrentUser] = useState<TeamUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedUser, setSelectedUser] = useState<TeamUser | null>(null);
   const [selectedLeads, setSelectedLeads] = useState<Lead[]>([]);
   const [profileLoading, setProfileLoading] = useState(false);
 
+  // Tab mode
+  const [activeTab, setActiveTab] = useState<"directory" | "tree">("directory");
+
+  // User details editing state
+  const [editRole, setEditRole] = useState<string>("");
+  const [editBranchId, setEditBranchId] = useState<string>("");
+  const [editReportsToId, setEditReportsToId] = useState<string>("");
+  const [savingUser, setSavingUser] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   // Add user modal state
   const [showAdd, setShowAdd] = useState(false);
   const [addUserType, setAddUserType] = useState<"admin" | "member">("member");
   const [newEmail, setNewEmail] = useState("");
   const [newName, setNewName] = useState("");
-  const [newRole, setNewRole] = useState<string>("agent");
+  const [newRole, setNewRole] = useState<string>("employee");
   const [newPassword, setNewPassword] = useState("");
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
@@ -59,8 +185,8 @@ export default function TeamDataPage() {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const res = await apiRequest<TeamListResponse>("/admin/users");
-      setUsers(res.data);
+      const res = await apiRequest<TeamUser[]>("/organizations/users");
+      setUsers(res);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -69,13 +195,93 @@ export default function TeamDataPage() {
     }
   };
 
+  const fetchBranches = async () => {
+    try {
+      const res = await apiRequest<Branch[]>("/organizations/branches");
+      setBranches(res);
+    } catch {
+      // ignore
+    }
+  };
+
+  const fetchCurrentUser = async () => {
+    try {
+      const res = await apiRequest<TeamUser>("/organizations/users/me");
+      setCurrentUser(res);
+    } catch {
+      // ignore
+    }
+  };
+
   useEffect(() => {
     void fetchUsers();
+    void fetchBranches();
+    void fetchCurrentUser();
   }, []);
 
-  // Separate admins and regular users
-  const admins = users.filter((u) => u.role === "admin");
-  const regularUsers = users.filter((u) => u.role !== "admin");
+  // When selectedUser is set, initialize editing states
+  useEffect(() => {
+    if (selectedUser) {
+      setEditRole(selectedUser.role_code || "employee");
+      setEditBranchId(selectedUser.branch_id || "");
+      setEditReportsToId(selectedUser.reports_to_id || "");
+      setSaveError(null);
+    }
+  }, [selectedUser]);
+
+  // Save changes to local user database
+  const handleUpdateUser = async () => {
+    if (!selectedUser) return;
+    setSavingUser(true);
+    setSaveError(null);
+    try {
+      const res = await apiRequest<TeamUser>(`/organizations/users/${selectedUser.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          role_code: editRole || null,
+          branch_id: editBranchId || null,
+          reports_to_id: editReportsToId || null,
+        }),
+      });
+      // Update in local state
+      setUsers(prev => prev.map(u => u.id === selectedUser.id ? { ...u, ...res } : u));
+      setSelectedUser(prev => prev ? { ...prev, ...res } : null);
+    } catch (err) {
+      setSaveError((err as Error).message);
+    } finally {
+      setSavingUser(false);
+    }
+  };
+
+  // Group users by role code for directories
+  const admins = useMemo(() => {
+    return users.filter(u => u.role_code === "super_admin" || u.role_code === "admin");
+  }, [users]);
+
+  const branchAdmins = useMemo(() => {
+    return users.filter(u => u.role_code === "branch_admin");
+  }, [users]);
+
+  const agents = useMemo(() => {
+    return users.filter(u => u.role_code === "individual_agent" || u.role_code === "agent" || u.role_code === "supervisor");
+  }, [users]);
+
+  const employees = useMemo(() => {
+    return users.filter(u => u.role_code === "employee" || (!u.role_code && u.role_id));
+  }, [users]);
+
+  // Compute Root Nodes for Hierarchy Tree (Users who have no valid supervisor in the list)
+  const rootUsers = useMemo(() => {
+    const userIds = new Set(users.map(u => u.id));
+    return users.filter(u => !u.reports_to_id || !userIds.has(u.reports_to_id));
+  }, [users]);
+
+  // Compute lists of potential managers for reporting structure
+  const potentialManagers = useMemo(() => {
+    if (!selectedUser) return [];
+    // Can report to any user EXCEPT themselves to avoid loops
+    return users.filter(u => u.id !== selectedUser.id);
+  }, [users, selectedUser]);
 
   const handleAddUser = async () => {
     if (!newEmail.trim() || !newName.trim() || !newPassword.trim()) {
@@ -99,7 +305,7 @@ export default function TeamDataPage() {
       setNewEmail("");
       setNewName("");
       setNewPassword("");
-      setNewRole("agent");
+      setNewRole("employee");
       setAddUserType("member");
       await fetchUsers();
     } catch (err) {
@@ -123,6 +329,11 @@ export default function TeamDataPage() {
     }
   };
 
+  // Determine if active user is an administrator
+  const isAuthorized = useMemo(() => {
+    return currentUser?.role_code === "super_admin" || currentUser?.role_code === "admin";
+  }, [currentUser]);
+
   return (
     <ProtectedPage>
       <section className="min-h-[calc(100vh-54px)] bg-transparent px-6 pb-10 pt-6">
@@ -130,11 +341,11 @@ export default function TeamDataPage() {
         <div className="mb-6 flex flex-wrap items-start justify-between gap-4 animate-fade-up">
           <div>
             <h1 className="text-[22px] font-bold tracking-tight text-slate-900 dark:text-white">
-              <Users size={20} className="inline mr-2 text-brand-500" />
-              Team Management
+              <Users size={20} className="inline mr-2 text-brand-500 animate-pulse" />
+              Team Directory & Hierarchy
             </h1>
             <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-300">
-              Manage admins, team members, permissions, and task distribution
+              Manage roles, branch locations, and organizational reporting lines.
             </p>
           </div>
           <button
@@ -153,13 +364,40 @@ export default function TeamDataPage() {
           </div>
         )}
 
+        {/* View Mode Tabs */}
+        <div className="mb-6 flex space-x-1 rounded-xl bg-slate-100 dark:bg-black/20 p-1 max-w-[320px] backdrop-blur-md">
+          <button
+            type="button"
+            onClick={() => setActiveTab("directory")}
+            className={`flex-1 rounded-lg py-1.5 text-xs font-semibold transition ${
+              activeTab === "directory"
+                ? "bg-white text-slate-900 shadow-sm dark:bg-white/15 dark:text-white"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+            }`}
+          >
+            Role Directories
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("tree")}
+            className={`flex-1 rounded-lg py-1.5 text-xs font-semibold transition ${
+              activeTab === "tree"
+                ? "bg-white text-slate-900 shadow-sm dark:bg-white/15 dark:text-white"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+            }`}
+          >
+            Hierarchy Tree
+          </button>
+        </div>
+
         {loading ? (
           <div className="flex items-center justify-center py-20">
             <RefreshCw className="animate-spin text-brand-500" size={24} />
           </div>
-        ) : (
+        ) : activeTab === "directory" ? (
           <div className="space-y-6">
-            {/* ─── ADMINS SECTION ──────────────────────────────────── */}
+            
+            {/* ─── 1. ADMINS DIRECTORY ──────────────────────────────── */}
             <div className="glass-card animate-fade-up" style={{ animationDelay: "0ms" }}>
               <div className="flex items-center justify-between border-b border-white/20 px-5 py-4 dark:border-white/10">
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
@@ -169,18 +407,20 @@ export default function TeamDataPage() {
                     {admins.length}
                   </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAddUserType("admin");
-                    setShowAdd(true);
-                    setAddError(null);
-                  }}
-                  className="flex h-8 items-center gap-1 rounded-lg bg-purple-500/20 px-2.5 text-xs font-semibold text-purple-700 hover:bg-purple-500/30 transition dark:text-purple-300"
-                >
-                  <Plus size={12} />
-                  Add Admin
-                </button>
+                {isAuthorized && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAddUserType("admin");
+                      setShowAdd(true);
+                      setAddError(null);
+                    }}
+                    className="flex h-8 items-center gap-1 rounded-lg bg-purple-500/20 px-2.5 text-xs font-semibold text-purple-700 hover:bg-purple-500/30 transition dark:text-purple-300"
+                  >
+                    <Plus size={12} />
+                    Add Admin
+                  </button>
+                )}
               </div>
 
               {admins.length === 0 ? (
@@ -189,39 +429,34 @@ export default function TeamDataPage() {
                   No admins found.
                 </div>
               ) : (
-                <div className="divide-y divide-white/10 dark:divide-white/5">
+                <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
                   {admins.map((user) => (
-                    <button key={user.id} type="button" onClick={() => void openUserProfile(user)} className="flex w-full flex-wrap items-center gap-3 px-5 py-4 text-left transition hover:bg-white/30 dark:hover:bg-white/5">
-                      {/* Avatar */}
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-purple-400 to-purple-600 text-[11px] font-bold text-white">
+                    <button
+                      key={user.id}
+                      type="button"
+                      onClick={() => void openUserProfile(user)}
+                      className="flex items-start gap-3 rounded-2xl border border-white/30 bg-white/40 p-4 text-left shadow-sm transition hover:bg-white/60 hover:shadow dark:border-white/5 dark:bg-white/5 dark:hover:bg-white/10"
+                    >
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-purple-400 to-purple-600 text-[11px] font-bold text-white shadow-inner">
                         {(user.name || user.email || user.id)[0].toUpperCase()}
                       </div>
-
-                      {/* Info */}
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
                           <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
                             {user.name || "Unnamed"}
                           </p>
-                          <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${roleColor(user.role)}`}>
-                            {user.role}
+                          <span className={`rounded-md px-1.5 py-0.2 text-[8px] font-bold uppercase ${roleColor(user.role_code)}`}>
+                            {user.role_code?.replace("_", " ")}
                           </span>
                         </div>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                          {user.email || user.id.substring(0, 12)}
-                        </p>
-                      </div>
-
-                      {/* Permissions chips */}
-                      <div className="hidden sm:flex flex-wrap gap-1 max-w-[200px]">
-                        {user.permissions.slice(0, 4).map((p) => (
-                          <span key={p} className="rounded-md bg-purple-500/10 px-1.5 py-0.5 text-[9px] font-medium text-purple-700 dark:text-purple-300 truncate max-w-[100px]">
-                            {p}
+                        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 truncate">{user.email}</p>
+                        
+                        <div className="mt-3 flex items-center gap-2 text-[10px] text-slate-500 dark:text-slate-400">
+                          <span className="flex items-center gap-0.5">
+                            <MapPin size={10} />
+                            {branches.find(b => b.id === user.branch_id)?.name || "All Branches"}
                           </span>
-                        ))}
-                        {user.permissions.length > 4 && (
-                          <span className="text-[9px] text-slate-500">+{user.permissions.length - 4}</span>
-                        )}
+                        </div>
                       </div>
                     </button>
                   ))}
@@ -229,91 +464,203 @@ export default function TeamDataPage() {
               )}
             </div>
 
-            {/* ─── TEAM MEMBERS SECTION ───────────────────────────── */}
-            <div className="glass-card animate-fade-up" style={{ animationDelay: "80ms" }}>
+            {/* ─── 2. BRANCH ADMINS DIRECTORY ───────────────────────── */}
+            <div className="glass-card animate-fade-up" style={{ animationDelay: "50ms" }}>
               <div className="flex items-center justify-between border-b border-white/20 px-5 py-4 dark:border-white/10">
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
-                  <UserCircle size={14} className="text-brand-500" />
-                  Team Members
-                  <span className="rounded-full bg-brand-500/15 px-2.5 py-0.5 text-[10px] font-semibold text-brand-700 dark:text-brand-300">
-                    {regularUsers.length}
+                  <Award size={15} className="text-blue-500" />
+                  Branch Administrators
+                  <span className="rounded-full bg-blue-500/15 px-2.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300">
+                    {branchAdmins.length}
                   </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAddUserType("member");
-                    setNewRole("agent");
-                    setShowAdd(true);
-                    setAddError(null);
-                  }}
-                  className="flex h-8 items-center gap-1 rounded-lg bg-brand-500 px-2.5 text-xs font-semibold text-white hover:bg-brand-600 transition"
-                >
-                  <Plus size={12} />
-                  Add Member
-                </button>
               </div>
 
-              {regularUsers.length === 0 ? (
-                <div className="flex flex-col items-center px-5 py-10 text-center text-xs text-slate-500 dark:text-slate-400">
-                  <Users size={28} className="mb-3 opacity-30" />
-                  No team members found. Add your first member.
+              {branchAdmins.length === 0 ? (
+                <div className="flex flex-col items-center px-5 py-8 text-center text-xs text-slate-500 dark:text-slate-400">
+                  <Award size={24} className="mb-3 opacity-30" />
+                  No branch admins registered.
                 </div>
               ) : (
-                <div className="divide-y divide-white/10 dark:divide-white/5">
-                  {regularUsers.map((user) => (
-                    <button key={user.id} type="button" onClick={() => void openUserProfile(user)} className="flex w-full flex-wrap items-center gap-3 px-5 py-4 text-left transition hover:bg-white/30 dark:hover:bg-white/5">
-                      {/* Avatar */}
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-400 to-indigo-500 text-[11px] font-bold text-white">
+                <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
+                  {branchAdmins.map((user) => (
+                    <button
+                      key={user.id}
+                      type="button"
+                      onClick={() => void openUserProfile(user)}
+                      className="flex items-start gap-3 rounded-2xl border border-white/30 bg-white/40 p-4 text-left shadow-sm transition hover:bg-white/60 hover:shadow dark:border-white/5 dark:bg-white/5 dark:hover:bg-white/10"
+                    >
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-400 to-indigo-500 text-[11px] font-bold text-white shadow-inner">
                         {(user.name || user.email || user.id)[0].toUpperCase()}
                       </div>
-
-                      {/* Info */}
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
-                            {user.name || "Unnamed"}
-                          </p>
-                          {user.role && (
-                            <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${roleColor(user.role)}`}>
-                              {user.role}
+                        <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
+                          {user.name || "Unnamed"}
+                        </p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{user.email}</p>
+                        
+                        <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-slate-500 dark:text-slate-400">
+                          <span className="flex items-center gap-0.5">
+                            <MapPin size={10} />
+                            {branches.find(b => b.id === user.branch_id)?.name || "Not Set"}
+                          </span>
+                          {user.reports_to_id && (
+                            <span className="flex items-center gap-0.5">
+                              <GitMerge size={10} />
+                              Reports to: {users.find(u => u.id === user.reports_to_id)?.name || "Admin"}
                             </span>
                           )}
                         </div>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                          {user.email || user.id.substring(0, 12)}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* ─── 3. CRM AGENTS DIRECTORY ─────────────────────────── */}
+            <div className="glass-card animate-fade-up" style={{ animationDelay: "100ms" }}>
+              <div className="flex items-center justify-between border-b border-white/20 px-5 py-4 dark:border-white/10">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  <Briefcase size={15} className="text-emerald-500" />
+                  CRM Agents & Advisors
+                  <span className="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
+                    {agents.length}
+                  </span>
+                </div>
+                {isAuthorized && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAddUserType("member");
+                      setNewRole("individual_agent");
+                      setShowAdd(true);
+                      setAddError(null);
+                    }}
+                    className="flex h-8 items-center gap-1 rounded-lg bg-emerald-500/20 px-2.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-500/30 transition dark:text-emerald-300"
+                  >
+                    <Plus size={12} />
+                    Add Agent
+                  </button>
+                )}
+              </div>
+
+              {agents.length === 0 ? (
+                <div className="flex flex-col items-center px-5 py-8 text-center text-xs text-slate-500 dark:text-slate-400">
+                  <Briefcase size={24} className="mb-3 opacity-30" />
+                  No agents found.
+                </div>
+              ) : (
+                <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
+                  {agents.map((user) => (
+                    <button
+                      key={user.id}
+                      type="button"
+                      onClick={() => void openUserProfile(user)}
+                      className="flex items-start gap-3 rounded-2xl border border-white/30 bg-white/40 p-4 text-left shadow-sm transition hover:bg-white/60 hover:shadow dark:border-white/5 dark:bg-white/5 dark:hover:bg-white/10"
+                    >
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-indigo-500 text-[11px] font-bold text-white shadow-inner">
+                        {(user.name || user.email || user.id)[0].toUpperCase()}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
+                          {user.name || "Unnamed"}
                         </p>
-                      </div>
-
-                      {/* Permissions chips */}
-                      <div className="hidden sm:flex flex-wrap gap-1 max-w-[200px]">
-                        {user.permissions.slice(0, 4).map((p) => (
-                          <span key={p} className="rounded-md bg-brand-500/10 px-1.5 py-0.5 text-[9px] font-medium text-brand-700 dark:text-brand-300 truncate max-w-[100px]">
-                            {p}
+                        <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{user.email}</p>
+                        
+                        <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-slate-500 dark:text-slate-400">
+                          <span className="flex items-center gap-0.5">
+                            <MapPin size={10} />
+                            {branches.find(b => b.id === user.branch_id)?.name || "Not Set"}
                           </span>
-                        ))}
-                        {user.permissions.length > 4 && (
-                          <span className="text-[9px] text-slate-500">+{user.permissions.length - 4}</span>
-                        )}
-                      </div>
+                          {user.reports_to_id && (
+                            <span className="flex items-center gap-0.5">
+                              <GitMerge size={10} />
+                              Reports to: {users.find(u => u.id === user.reports_to_id)?.name || "Admin"}
+                            </span>
+                          )}
+                        </div>
 
-                      {/* Task count badge */}
-                      <div className="flex items-center gap-1.5 rounded-xl bg-white/30 dark:bg-white/5 px-2.5 py-1.5">
-                        <BarChart2 size={11} className="text-slate-500" />
-                        <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">{user.task_count}</span>
-                        <span className="text-[9px] text-slate-500">tasks</span>
+                        {/* Counts badges */}
+                        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                          <span className="inline-flex items-center gap-1 rounded-lg bg-slate-100 dark:bg-white/5 px-2 py-0.5 text-[9px] font-semibold text-slate-600 dark:text-slate-300">
+                            <BarChart2 size={9} />
+                            {user.task_count} tasks
+                          </span>
+                          <span className="inline-flex items-center gap-1 rounded-lg bg-brand-500/10 px-2 py-0.5 text-[9px] font-semibold text-brand-700 dark:text-brand-300">
+                            <Users size={9} />
+                            {user.lead_count} leads
+                          </span>
+                        </div>
                       </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
-                      <div className="flex items-center gap-1.5 rounded-xl bg-brand-500/10 px-2.5 py-1.5">
-                        <Users size={11} className="text-brand-600 dark:text-brand-300" />
-                        <span className="text-xs font-semibold text-brand-700 dark:text-brand-300">{user.lead_count}</span>
-                        <span className="text-[9px] text-brand-600/80 dark:text-brand-300/80">leads</span>
+            {/* ─── 4. EMPLOYEES DIRECTORY ──────────────────────────── */}
+            <div className="glass-card animate-fade-up" style={{ animationDelay: "150ms" }}>
+              <div className="flex items-center justify-between border-b border-white/20 px-5 py-4 dark:border-white/10">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  <UserCircle size={14} className="text-indigo-500" />
+                  Employees & Staff
+                  <span className="rounded-full bg-indigo-500/15 px-2.5 py-0.5 text-[10px] font-semibold text-indigo-700 dark:text-indigo-300">
+                    {employees.length}
+                  </span>
+                </div>
+                {isAuthorized && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAddUserType("member");
+                      setNewRole("employee");
+                      setShowAdd(true);
+                      setAddError(null);
+                    }}
+                    className="flex h-8 items-center gap-1 rounded-lg bg-indigo-500/20 px-2.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-500/30 transition dark:text-indigo-300"
+                  >
+                    <Plus size={12} />
+                    Add Staff
+                  </button>
+                )}
+              </div>
+
+              {employees.length === 0 ? (
+                <div className="flex flex-col items-center px-5 py-8 text-center text-xs text-slate-500 dark:text-slate-400">
+                  <UserCircle size={24} className="mb-3 opacity-30" />
+                  No staff members registered.
+                </div>
+              ) : (
+                <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
+                  {employees.map((user) => (
+                    <button
+                      key={user.id}
+                      type="button"
+                      onClick={() => void openUserProfile(user)}
+                      className="flex items-start gap-3 rounded-2xl border border-white/30 bg-white/40 p-4 text-left shadow-sm transition hover:bg-white/60 hover:shadow dark:border-white/5 dark:bg-white/5 dark:hover:bg-white/10"
+                    >
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 text-[11px] font-bold text-white shadow-inner">
+                        {(user.name || user.email || user.id)[0].toUpperCase()}
                       </div>
-
-                      <div className="flex items-center gap-1.5 rounded-xl bg-brand-500/10 px-2.5 py-1.5">
-                        <Users size={11} className="text-brand-600 dark:text-brand-300" />
-                        <span className="text-xs font-semibold text-brand-700 dark:text-brand-300">{user.lead_count}</span>
-                        <span className="text-[9px] text-brand-600/80 dark:text-brand-300/80">leads</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
+                          {user.name || "Unnamed"}
+                        </p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{user.email}</p>
+                        
+                        <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-slate-500 dark:text-slate-400">
+                          <span className="flex items-center gap-0.5">
+                            <MapPin size={10} />
+                            {branches.find(b => b.id === user.branch_id)?.name || "Not Set"}
+                          </span>
+                          {user.reports_to_id && (
+                            <span className="flex items-center gap-0.5">
+                              <GitMerge size={10} />
+                              Reports to: {users.find(u => u.id === user.reports_to_id)?.name || "Admin"}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </button>
                   ))}
@@ -321,51 +668,193 @@ export default function TeamDataPage() {
               )}
             </div>
           </div>
+        ) : (
+          /* ─── HIERARCHY TREE VIEW ───────────────────────────────── */
+          <div className="glass-card p-6 animate-fade-up">
+            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2">
+              <GitMerge size={16} className="text-brand-500" />
+              Organizational Chart
+            </h2>
+            {rootUsers.length === 0 ? (
+              <p className="text-xs text-slate-500">No users found in hierarchy structure.</p>
+            ) : (
+              <div className="space-y-4 overflow-x-auto pb-4">
+                {rootUsers.map((user) => (
+                  <div key={user.id} className="relative pl-0 my-3">
+                    <div className="flex flex-wrap items-center justify-between gap-4 bg-white/50 dark:bg-black/30 backdrop-blur-md border border-white/40 dark:border-white/10 rounded-2xl p-4 shadow-sm max-w-2xl">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-indigo-600 text-xs font-bold text-white shadow shadow-brand-500/20">
+                          {(user.name || user.email || user.id)[0].toUpperCase()}
+                        </div>
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-bold text-slate-900 dark:text-white">
+                              {user.name || "Unnamed"} (Root Owner)
+                            </p>
+                            <span className={`rounded-md px-1.5 py-0.5 text-[8px] font-bold tracking-wider uppercase ${roleColor(user.role_code)}`}>
+                              {user.role_code?.replace("_", " ") || "Super Admin"}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">{user.email}</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void openUserProfile(user)}
+                        className="rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-white/10 dark:hover:bg-white/20 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 transition"
+                      >
+                        Manage
+                      </button>
+                    </div>
+                    {/* Render children recursively */}
+                    {users.filter(u => u.reports_to_id === user.id).map(rep => (
+                      <TreeNode
+                        key={rep.id}
+                        user={rep}
+                        allUsers={users}
+                        level={1}
+                        onSelectUser={openUserProfile}
+                        roleColor={roleColor}
+                        branches={branches}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
+        {/* ─── User Profile & Edit Hierarchy Sidebar ──────────────── */}
         {selectedUser && (
           <div className="fixed inset-0 z-50 flex items-center justify-end bg-slate-950/40 backdrop-blur-sm p-3">
-            <div className="flex h-full w-full max-w-xl flex-col rounded-2xl border border-white/20 bg-white/95 shadow-2xl backdrop-blur-2xl dark:bg-slate-900/95">
-              <div className="flex items-center justify-between border-b border-white/20 px-5 py-4 dark:border-white/10">
+            <div className="flex h-full w-full max-w-xl flex-col rounded-2xl border border-white/20 bg-white/95 shadow-2xl backdrop-blur-2xl dark:bg-slate-900/95 overflow-y-auto">
+              <div className="flex items-center justify-between border-b border-slate-150 px-5 py-4 dark:border-white/10">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-widest text-brand-500 dark:text-brand-400">User Profile</p>
                   <h2 className="mt-1 text-xl font-bold text-slate-900 dark:text-white">{selectedUser.name || selectedUser.email || selectedUser.id}</h2>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">Assigned leads and permissions</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{selectedUser.email}</p>
                 </div>
                 <button type="button" onClick={() => setSelectedUser(null)} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10">
                   <X size={16} />
                 </button>
               </div>
 
+              {/* Stats Grid */}
               <div className="grid gap-3 px-5 py-4 sm:grid-cols-3">
-                <div className="rounded-2xl border border-white/20 bg-white/40 px-4 py-3 dark:border-white/10 dark:bg-white/5">
-                  <div className="text-[10px] uppercase tracking-widest text-slate-500 dark:text-slate-400">Tasks</div>
+                <div className="rounded-2xl border border-slate-150 bg-slate-50/50 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+                  <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Tasks</div>
                   <div className="mt-1 text-xl font-bold text-slate-900 dark:text-white">{selectedUser.task_count}</div>
                 </div>
-                <div className="rounded-2xl border border-white/20 bg-white/40 px-4 py-3 dark:border-white/10 dark:bg-white/5">
-                  <div className="text-[10px] uppercase tracking-widest text-slate-500 dark:text-slate-400">Leads</div>
+                <div className="rounded-2xl border border-slate-150 bg-slate-50/50 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+                  <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Leads</div>
                   <div className="mt-1 text-xl font-bold text-slate-900 dark:text-white">{selectedUser.lead_count}</div>
                 </div>
-                <div className="rounded-2xl border border-white/20 bg-white/40 px-4 py-3 dark:border-white/10 dark:bg-white/5">
-                  <div className="text-[10px] uppercase tracking-widest text-slate-500 dark:text-slate-400">Permissions</div>
+                <div className="rounded-2xl border border-slate-150 bg-slate-50/50 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+                  <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Permissions</div>
                   <div className="mt-1 text-xl font-bold text-slate-900 dark:text-white">{selectedUser.permissions.length}</div>
                 </div>
               </div>
 
-              <div className="px-5 pb-5">
-                <h3 className="mb-3 text-sm font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Assigned Leads</h3>
-                <div className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
+              {/* ─── Hierarchy & Role Assignment Panel (Admins Only) ─── */}
+              {isAuthorized && (
+                <div className="mx-5 mb-5 rounded-2xl border border-brand-500/20 bg-brand-500/5 p-4 dark:border-brand-500/30">
+                  <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-brand-700 dark:text-brand-300 flex items-center gap-1.5">
+                    <GitMerge size={14} />
+                    Hierarchy & Role Assignment
+                  </h3>
+
+                  {saveError && (
+                    <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300">
+                      {saveError}
+                    </div>
+                  )}
+
+                  <div className="space-y-4">
+                    {/* Role Dropdown */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                        Assign Role
+                      </label>
+                      <select
+                        value={editRole}
+                        onChange={(e) => setEditRole(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 bg-white dark:border-white/15 dark:bg-slate-950/50 px-3 py-2 text-xs outline-none focus:border-brand-400 dark:text-white"
+                      >
+                        {ROLE_PRESETS.map((preset) => (
+                          <option key={preset.code} value={preset.code}>
+                            {preset.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Branch Dropdown */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                        Assign Branch
+                      </label>
+                      <select
+                        value={editBranchId}
+                        onChange={(e) => setEditBranchId(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 bg-white dark:border-white/15 dark:bg-slate-950/50 px-3 py-2 text-xs outline-none focus:border-brand-400 dark:text-white"
+                      >
+                        <option value="">All Branches / Corporate HQ</option>
+                        {branches.map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {b.name} ({b.location || "No Location"})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Supervisor (Reports To) Dropdown */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                        Reports To (Supervisor)
+                      </label>
+                      <select
+                        value={editReportsToId}
+                        onChange={(e) => setEditReportsToId(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 bg-white dark:border-white/15 dark:bg-slate-950/50 px-3 py-2 text-xs outline-none focus:border-brand-400 dark:text-white"
+                      >
+                        <option value="">None (Independent / Top Level)</option>
+                        {potentialManagers.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name || m.email} ({m.role_code?.replace("_", " ") || "User"})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => void handleUpdateUser()}
+                      disabled={savingUser}
+                      className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-brand-500 px-4 py-2 text-xs font-semibold text-white transition hover:bg-brand-600 disabled:opacity-60"
+                    >
+                      {savingUser ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle size={12} />}
+                      {savingUser ? "Saving changes..." : "Save Role & Hierarchy"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Assigned Leads Section */}
+              <div className="px-5 pb-6">
+                <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Assigned CRM Leads</h3>
+                <div className="max-h-[30vh] space-y-2 overflow-y-auto pr-1">
                   {profileLoading ? (
                     <div className="flex items-center justify-center py-10 text-brand-500"><Loader2 size={18} className="animate-spin" /></div>
                   ) : selectedLeads.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-white/20 bg-white/30 px-4 py-8 text-sm text-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-slate-400">
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 px-4 py-8 text-center text-xs text-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-slate-400">
                       No leads are assigned to this user.
                     </div>
                   ) : selectedLeads.map((lead) => (
-                    <div key={lead.id} className="rounded-2xl border border-white/20 bg-white/40 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+                    <div key={lead.id} className="rounded-2xl border border-slate-150 bg-white dark:border-white/10 dark:bg-white/5 px-4 py-3">
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <p className="font-semibold text-slate-900 dark:text-white">{lead.company_name}</p>
+                          <p className="font-semibold text-sm text-slate-900 dark:text-white">{lead.company_name}</p>
                           <p className="text-xs text-slate-500 dark:text-slate-400">{lead.contact_person || lead.email || lead.source || "Lead"}</p>
                         </div>
                         <span className="rounded-full bg-brand-500/15 px-3 py-1 text-[11px] font-semibold text-brand-700 dark:text-brand-300">{lead.status}</span>
@@ -403,7 +892,7 @@ export default function TeamDataPage() {
                   <input
                     value={newEmail}
                     onChange={(e) => setNewEmail(e.target.value)}
-                    className="w-full rounded-xl border border-white/50 bg-white/60 px-3 py-2.5 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+                    className="w-full rounded-xl border border-slate-200 bg-white dark:border-white/10 dark:bg-black/20 dark:text-white px-3 py-2.5 text-sm outline-none focus:border-brand-400"
                     placeholder="colleague@company.com"
                     type="email"
                   />
@@ -414,7 +903,7 @@ export default function TeamDataPage() {
                   <input
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
-                    className="w-full rounded-xl border border-white/50 bg-white/60 px-3 py-2.5 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+                    className="w-full rounded-xl border border-slate-200 bg-white dark:border-white/10 dark:bg-black/20 dark:text-white px-3 py-2.5 text-sm outline-none focus:border-brand-400"
                     placeholder="John Doe"
                   />
                 </label>
@@ -424,7 +913,7 @@ export default function TeamDataPage() {
                   <input
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
-                    className="w-full rounded-xl border border-white/50 bg-white/60 px-3 py-2.5 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+                    className="w-full rounded-xl border border-slate-200 bg-white dark:border-white/10 dark:bg-black/20 dark:text-white px-3 py-2.5 text-sm outline-none focus:border-brand-400"
                     placeholder="Min 8 characters"
                     type="password"
                   />
@@ -433,19 +922,19 @@ export default function TeamDataPage() {
                 {addUserType === "member" && (
                   <label className="block">
                     <span className="mb-1 block text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Role</span>
-                    <div className="flex gap-2">
-                      {ROLE_PRESETS.map((role) => (
+                    <div className="grid grid-cols-2 gap-2">
+                      {ROLE_PRESETS.filter(r => r.code !== "super_admin").map((role) => (
                         <button
-                          key={role}
+                          key={role.code}
                           type="button"
-                          onClick={() => setNewRole(role)}
-                          className={`flex-1 rounded-xl px-3 py-2 text-xs font-semibold capitalize transition ${
-                            newRole === role
+                          onClick={() => setNewRole(role.code)}
+                          className={`rounded-xl px-3 py-2 text-xs font-semibold capitalize transition ${
+                            newRole === role.code
                               ? "bg-brand-500 text-white"
-                              : "border border-white/30 bg-white/40 text-slate-600 hover:bg-white/70 dark:border-white/10 dark:bg-white/5 dark:text-slate-300"
+                              : "border border-slate-200 bg-slate-50/50 text-slate-600 hover:bg-slate-100 dark:border-white/10 dark:bg-white/5 dark:text-slate-300"
                           }`}
                         >
-                          {role}
+                          {role.label}
                         </button>
                       ))}
                     </div>

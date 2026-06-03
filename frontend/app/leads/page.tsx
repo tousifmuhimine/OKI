@@ -192,7 +192,37 @@ function LeadsContent() {
   const [industryData, setIndustryData] = useState<Record<string, unknown> | null>(null);
   const [leadSidebarTab, setLeadSidebarTab] = useState<"details" | "activity" | "edit">("details");
 
+  const [lastEducation, setLastEducation] = useState("");
+  const [leadAssignedUserIds, setLeadAssignedUserIds] = useState<string[]>([]);
+  const [editAssignedUserIds, setEditAssignedUserIds] = useState<string[]>([]);
+  const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
+  const [branchFilter, setBranchFilter] = useState("all");
+  const [agentFilter, setAgentFilter] = useState("all");
+  const [leadDocuments, setLeadDocuments] = useState<any[]>([]);
+  const [leadDocUploading, setLeadDocUploading] = useState(false);
+  const [leadDocError, setLeadDocError] = useState<string | null>(null);
+
+  // Custom states added for tenancy, custom fields & bulk actions
+  const [orgTypeCode, setOrgTypeCode] = useState<string | null>(null);
+  const [leadAssignedUserId, setLeadAssignedUserId] = useState("");
+  const [countryInput, setCountryInput] = useState("");
+  const [editCountryInput, setEditCountryInput] = useState("");
+  const [editIndustryData, setEditIndustryData] = useState<Record<string, unknown> | null>(null);
+  const [customerDocuments, setCustomerDocuments] = useState<any[]>([]);
+  
+  // Bulk share states
+  const [isBulkShareOpen, setIsBulkShareOpen] = useState(false);
+  const [bulkShareLinks, setBulkShareLinks] = useState<{ company: string; url: string }[]>([]);
+  const [bulkShareEmails, setBulkShareEmails] = useState("");
+  const [bulkShareMode, setBulkShareMode] = useState<"public" | "restricted">("restricted");
+  const [bulkSharing, setBulkSharing] = useState(false);
+  const [bulkShareError, setBulkShareError] = useState<string | null>(null);
+
   const [createLeadOpen, setCreateLeadOpen] = useState(false);
+  const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
+  const [bulkUpdating, setBulkUpdating] = useState(false);
+  const [bulkAssignOpen, setBulkAssignOpen] = useState(false);
+  const [bulkStageOpen, setBulkStageOpen] = useState(false);
   const [shareLeadId, setShareLeadId] = useState<string | null>(null);
   const [shareMode, setShareMode] = useState<"public" | "restricted">("restricted");
   const [shareEmails, setShareEmails] = useState("");
@@ -332,6 +362,8 @@ function LeadsContent() {
       } else if (quickFilter !== "all") {
         params.set("quick_filter", quickFilter === "assigned" ? "assigned_to_me" : quickFilter === "followup" ? "followups_due" : quickFilter);
       }
+      if (branchFilter !== "all") params.set("branch_id", branchFilter);
+      if (agentFilter !== "all") params.set("assigned_user_id", agentFilter);
       if (startDate) params.set("start_date", apiDate(startDate));
       if (endDate) params.set("end_date", apiDate(endDate, true));
       const leadResponse = await apiRequest<LeadListResponse>(
@@ -350,6 +382,7 @@ function LeadsContent() {
       setSelectedId((current) => current && leadResponse.data.some((lead) => lead.id === current)
         ? current
         : null);
+      setSelectedLeadIds([]);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -390,16 +423,24 @@ function LeadsContent() {
     return () => clearTimeout(timer);
   }, [phone]);
 
-  // Sync editPhone when editModalLeadId changes
+  // Sync editPhone, editTags, editIndustryData, and aiInstructions when editModalLeadId changes
   useEffect(() => {
     if (editModalLeadId) {
       const lead = leads.find((l) => l.id === editModalLeadId);
       if (lead) {
         setEditPhone(lead.phone || "");
+        setEditTags(lead.tags ?? []);
+        setAiInstructions(lead.ai_instructions ?? "");
+        setEditAssignedUserIds(lead.assigned_user_ids ?? []);
+        setEditIndustryData(lead.industry_data ?? null);
       }
       setEditPhoneWarning(null);
     } else {
       setEditPhone("");
+      setEditTags([]);
+      setAiInstructions("");
+      setEditAssignedUserIds([]);
+      setEditIndustryData(null);
       setEditPhoneWarning(null);
     }
   }, [editModalLeadId, leads]);
@@ -429,18 +470,18 @@ function LeadsContent() {
 
   async function loadConfigs() {
     try {
-      const [sources, stages, sectors, areas, professions, usersRes] = await Promise.all([
+      const [sources, stages, sectors, areas, professions, usersRes, branchesRes] = await Promise.all([
         apiRequest<LeadSourceConfig[]>("/config/lead-sources?active_only=true"),
         apiRequest<LeadStageConfig[]>("/config/lead-stages?active_only=true"),
         apiRequest<LeadNamedConfig[]>("/config/lead-sectors?active_only=true"),
         apiRequest<LeadNamedConfig[]>("/config/lead-areas?active_only=true"),
         apiRequest<LeadNamedConfig[]>("/config/lead-professions?active_only=true"),
-        currentUser?.role === "admin"
-          ? apiRequest<{ data: { id: string; name: string | null; email: string | null; role: string | null }[] }>("/admin/users").catch(() => ({ data: [] }))
-          : Promise.resolve({ data: [] }),
+        apiRequest<any[]>("/organizations/users").catch(() => []),
+        apiRequest<any[]>("/organizations/branches").catch(() => []),
       ]);
       setConfigs({ sources, stages, sectors, areas, professions });
-      setUsers(usersRes.data);
+      setUsers(usersRes);
+      setBranches(branchesRes);
 
     } catch (err) {
       setError((err as Error).message);
@@ -459,14 +500,24 @@ function LeadsContent() {
     }
   }
 
-  // Load current user role from Supabase
+  // Load current user role and org type code
   useEffect(() => {
-    getSupabaseClient().auth.getUser().then(({ data }) => {
-      if (data.user) {
-        const role = data.user.user_metadata?.role || "agent";
-        setCurrentUser({ role, id: data.user.id });
-      }
-    });
+    if (typeof window !== "undefined") {
+      setOrgTypeCode(sessionStorage.getItem("oki_org_type_code") || "study_abroad");
+    }
+    apiRequest<{ id: string; role_code: string } | { id: string; role: string }>("/users/me")
+      .then((user: any) => {
+        const role = user.role_code || user.role || "agent";
+        setCurrentUser({ role, id: user.id });
+      })
+      .catch(() => {
+        getSupabaseClient().auth.getUser().then(({ data }) => {
+          if (data.user) {
+            const role = data.user.user_metadata?.role || "agent";
+            setCurrentUser({ role, id: data.user.id });
+          }
+        });
+      });
   }, []);
 
   useEffect(() => {
@@ -479,7 +530,7 @@ function LeadsContent() {
       void loadLeads();
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [query, statusFilter, sourceFilter, priorityFilter, tagFilter, sortOrder, startDate, endDate, configs.stages.length]);
+  }, [query, statusFilter, sourceFilter, priorityFilter, tagFilter, sortOrder, startDate, endDate, configs.stages.length, branchFilter, agentFilter]);
   useEffect(() => {
     if (!selectedLead) return;
     setAiInstructions(selectedLead.ai_instructions ?? "");
@@ -591,13 +642,18 @@ function LeadsContent() {
           lead_source_id: leadSourceId || null,
           lead_stage_id: leadStageId || null,
           lead_area_id: leadAreaId || null,
-          lead_profession_id: leadProfessionId || null,
           priority: leadPriority,
           tags: leadTags.length ? leadTags : null,
           industry_data: industryData || null,
-          raw_note: rawNotes || null, // Capture manual notes if any
+          raw_note: rawNotes || null,
+          last_education: lastEducation || null,
+          assigned_user_id: leadAssignedUserId || null,
+          assigned_user_ids: leadAssignedUserIds.length ? leadAssignedUserIds : null,
         }),
       });
+      setLastEducation("");
+      setLeadAssignedUserIds([]);
+      setLeadAssignedUserId("");
       setCompanyName("");
       setContactPerson("");
       setPhone("");
@@ -624,6 +680,13 @@ function LeadsContent() {
 
   const updateIndustryField = (key: string, value: any) => {
     setIndustryData((prev) => ({
+      ...(prev || {}),
+      [key]: value,
+    }));
+  };
+
+  const updateEditIndustryField = (key: string, value: any) => {
+    setEditIndustryData((prev) => ({
       ...(prev || {}),
       [key]: value,
     }));
@@ -677,6 +740,96 @@ function LeadsContent() {
       setSavingId(null);
     }
   }
+
+  const handleSelectAll = () => {
+    if (selectedLeadIds.length === filteredLeads.length) {
+      setSelectedLeadIds([]);
+    } else {
+      setSelectedLeadIds(filteredLeads.map((l) => l.id));
+    }
+  };
+
+  const handleSelectLead = (id: string) => {
+    setSelectedLeadIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const bulkAssign = async (userId: string) => {
+    if (selectedLeadIds.length === 0) return;
+    setBulkUpdating(true);
+    setBulkAssignOpen(false);
+    try {
+      await Promise.all(
+        selectedLeadIds.map((id) =>
+          apiRequest(`/leads/${id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ assigned_user_id: userId || null }),
+          })
+        )
+      );
+      await loadLeads();
+      setSelectedLeadIds([]);
+      setError(null);
+    } catch (err) {
+      setError(`Bulk assignment failed: ${(err as Error).message}`);
+    } finally {
+      setBulkUpdating(false);
+    }
+  };
+
+  const bulkChangeStage = async (stageId: string) => {
+    if (selectedLeadIds.length === 0) return;
+    const stageName = configs.stages.find((s) => s.id === stageId)?.name;
+    const statusVal = stageName
+      ? stageName.toLowerCase().replace(/\s+/g, "_")
+      : "new";
+    setBulkUpdating(true);
+    setBulkStageOpen(false);
+    try {
+      await Promise.all(
+        selectedLeadIds.map((id) =>
+          apiRequest(`/leads/${id}`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              lead_stage_id: stageId || null,
+              status: statusVal,
+            }),
+          })
+        )
+      );
+      await loadLeads();
+      setSelectedLeadIds([]);
+      setError(null);
+    } catch (err) {
+      setError(`Bulk stage change failed: ${(err as Error).message}`);
+    } finally {
+      setBulkUpdating(false);
+    }
+  };
+
+  const bulkDelete = async () => {
+    if (selectedLeadIds.length === 0) return;
+    const ok = window.confirm(`Delete all ${selectedLeadIds.length} selected leads?`);
+    if (!ok) return;
+    setBulkUpdating(true);
+    try {
+      await Promise.all(
+        selectedLeadIds.map((id) =>
+          apiRequest(`/leads/${id}`, {
+            method: "DELETE",
+          })
+        )
+      );
+      await loadLeads();
+      setSelectedLeadIds([]);
+      setError(null);
+    } catch (err) {
+      setError(`Bulk deletion failed: ${(err as Error).message}`);
+    } finally {
+      setBulkUpdating(false);
+    }
+  };
 
   async function createLeadActivity(activityType: "call" | "message" | "follow_up") {
     if (!selectedLead || !activityNote.trim()) return;
@@ -756,6 +909,41 @@ function LeadsContent() {
     }
   }
 
+  async function handleBulkShareSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (selectedLeadIds.length === 0) return;
+    setBulkSharing(true);
+    setBulkShareError(null);
+    try {
+      const payload: any = { mode: bulkShareMode };
+      if (bulkShareMode === "restricted") {
+        const emails = bulkShareEmails.split(",").map(em => em.trim()).filter(Boolean);
+        if (emails.length === 0) throw new Error("Please enter at least one email address");
+        payload.allowed_emails = emails;
+      }
+      
+      const results: { company: string; url: string }[] = [];
+      for (const id of selectedLeadIds) {
+        const lead = leads.find(l => l.id === id);
+        const companyName = lead?.company_name || lead?.contact_person || id.substring(0, 8);
+        try {
+          const res = await apiRequest<{ share_url: string }>(`/leads/${id}/share-links`, {
+            method: "POST",
+            body: JSON.stringify(payload)
+          });
+          results.push({ company: companyName, url: res.share_url });
+        } catch (err: any) {
+          results.push({ company: companyName, url: `Error: ${err.message}` });
+        }
+      }
+      setBulkShareLinks(results);
+    } catch (err: any) {
+      setBulkShareError(err.message);
+    } finally {
+      setBulkSharing(false);
+    }
+  }
+
   async function loadLeadDetail(leadId: string) {
     try {
       const detailed = await apiRequest<Lead>(currentUser?.role === "agent" ? `/ai/assigned-leads/${leadId}` : `/leads/${leadId}`);
@@ -766,12 +954,22 @@ function LeadsContent() {
         }
         return [detailed, ...current];
       });
-      setError(null);
-      if (leadSidebarTab === "activity") {
-        void loadActivities(leadId);
+      if (detailed.converted_customer_id) {
+        void loadCustomerDocuments(detailed.converted_customer_id);
+      } else {
+        setCustomerDocuments([]);
       }
     } catch (err) {
       setError((err as Error).message);
+    }
+  }
+
+  async function loadCustomerDocuments(customerId: string) {
+    try {
+      const docs = await apiRequest<any[]>(`/documents?customer_id=${customerId}`);
+      setCustomerDocuments(docs);
+    } catch {
+      setCustomerDocuments([]);
     }
   }
 
@@ -779,7 +977,106 @@ function LeadsContent() {
     // Ensure we have the canonical lead payload before showing details.
     void loadLeadDetail(leadId);
     setSelectedId(leadId);
+    void loadLeadDocuments(leadId);
+    const lead = leads.find(l => l.id === leadId);
+    if (lead?.converted_customer_id) {
+      void loadCustomerDocuments(lead.converted_customer_id);
+    } else {
+      setCustomerDocuments([]);
+    }
   }
+
+  async function loadLeadDocuments(leadId: string) {
+    try {
+      const docs = await apiRequest<any[]>(`/documents?lead_id=${leadId}`);
+      setLeadDocuments(docs);
+    } catch {
+      setLeadDocuments([]);
+    }
+  }
+
+  async function handleLeadDocUpload(fileType: string, file: File) {
+    if (!selectedId) return;
+    setLeadDocUploading(true);
+    setLeadDocError(null);
+    try {
+      const formData = new FormData();
+      formData.append("file_type", fileType);
+      formData.append("lead_id", selectedId);
+      formData.append("file", file);
+      
+      const newDoc = await apiRequest<any>("/documents/upload", {
+        method: "POST",
+        body: formData,
+      });
+      setLeadDocuments((prev) => [newDoc, ...prev]);
+    } catch (err) {
+      setLeadDocError((err as Error).message);
+    } finally {
+      setLeadDocUploading(false);
+    }
+  }
+
+  async function handleDeleteLeadDoc(docId: string) {
+    const ok = window.confirm("Are you sure you want to delete this document?");
+    if (!ok) return;
+    try {
+      await apiRequest(`/documents/${docId}`, { method: "DELETE" });
+      setLeadDocuments((prev) => prev.filter((d) => d.id !== docId));
+    } catch (err) {
+      alert((err as Error).message);
+    }
+  }
+
+  const getFullFileUrl = (relativeUrl: string) => {
+    const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/api/v1";
+    const host = apiBase.replace("/api/v1", "");
+    return `${host}${relativeUrl}`;
+  };
+
+  const handleExport = () => {
+    const params = new URLSearchParams();
+    if (query.trim()) params.set("search", query.trim());
+    if (statusFilter !== "all") params.set(configs.stages.some((stage) => stage.id === statusFilter) ? "stage_id" : "status", statusFilter);
+    if (sourceFilter !== "all") params.set("source_id", sourceFilter);
+    if (priorityFilter !== "all") params.set("priority", priorityFilter);
+    if (tagFilter !== "all") params.set("tag", tagFilter);
+    if (branchFilter !== "all") params.set("branch_id", branchFilter);
+    if (agentFilter !== "all") params.set("assigned_user_id", agentFilter);
+    if (startDate) params.set("start_date", apiDate(startDate));
+    if (endDate) params.set("end_date", apiDate(endDate, true));
+    
+    const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/api/v1";
+    window.open(`${baseUrl}/leads/export?${params.toString()}`);
+  };
+
+  const handleBulkUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    const file = e.target.files[0];
+    
+    setLoading(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      
+      const res = await apiRequest<{ success: boolean; imported_count: number; errors: string[] }>("/leads/bulk-upload", {
+        method: "POST",
+        body: formData
+      });
+      
+      if (res.errors && res.errors.length > 0) {
+        setError(`Imported ${res.imported_count} leads. Errors: ${res.errors.join("; ")}`);
+      } else {
+        alert(`Successfully imported ${res.imported_count} leads.`);
+      }
+      await loadLeads();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   function goToLead(leadId: string, tab: "details" | "edit" = "details") {
     router.push(`/leads?leadId=${encodeURIComponent(leadId)}&tab=${tab}`);
@@ -822,9 +1119,29 @@ function LeadsContent() {
             </div>
             <div>
               <span className="mb-1 block text-[11px] font-semibold text-slate-500">Assigned To</span>
-              <p className="text-sm font-semibold text-slate-900 dark:text-white">{users.find(u => u.id === selectedLead.assigned_user_id)?.name || selectedLead.assigned_user_id || "N/A"}</p>
+              <div className="flex items-center gap-1.5">
+                <p className="text-sm font-semibold text-slate-900 dark:text-white truncate max-w-[120px]">
+                  {users.find(u => u.id === selectedLead.assigned_user_id)?.name || selectedLead.assigned_user_id || "Unassigned"}
+                </p>
+                {(currentUser?.role === "admin" || currentUser?.role === "super_admin") && (
+                  <select
+                    value={selectedLead.assigned_user_id || ""}
+                    onChange={(e) => void updateLead(selectedLead.id, { assigned_user_id: e.target.value || null })}
+                    className="h-8 rounded-lg border border-white/50 bg-white/50 px-2 py-0.5 text-xs text-slate-700 outline-none dark:border-white/10 dark:bg-slate-800 dark:text-slate-200 focus:border-brand-500 focus:ring-1 focus:ring-brand-500/20"
+                  >
+                    <option value="">Assign...</option>
+                    {users.map((u) => (
+                      <option key={u.id} value={u.id}>{u.name || u.email || u.id}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
             </div>
             <div>
+              <span className="mb-1 block text-[11px] font-semibold text-slate-500">Location</span>
+              <p className="text-sm font-semibold text-slate-900 dark:text-white">{selectedArea?.name || "N/A"}</p>
+            </div>
+            <div className="col-span-3">
               <span className="mb-1 block text-[11px] font-semibold text-slate-500">Address</span>
               <p className="text-sm font-semibold text-slate-900 dark:text-white">{selectedLead.address || "N/A"}</p>
             </div>
@@ -886,6 +1203,16 @@ function LeadsContent() {
               <span className="mb-1 block text-[11px] font-semibold text-slate-500">Lost</span>
               <p className="text-sm font-semibold text-slate-900 dark:text-white">{selectedLead.status === "lost" ? "Yes" : "N/A"}</p>
             </div>
+            <div>
+              <span className="mb-1 block text-[11px] font-semibold text-slate-500">
+                {orgTypeCode === "study_abroad" ? "Last Education" : "Profession"}
+              </span>
+              <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                {orgTypeCode === "study_abroad"
+                  ? (selectedLead.last_education || "N/A")
+                  : (selectedProfession?.name || "N/A")}
+              </p>
+            </div>
             <div className="col-span-2">
               <span className="mb-1 block text-[11px] font-semibold text-slate-500">Remarks</span>
               <p className="text-sm font-semibold text-slate-900 dark:text-white">{selectedLead.raw_note || "Nothing"}</p>
@@ -896,6 +1223,166 @@ function LeadsContent() {
             </div>
           </div>
         </div>
+
+        {orgTypeCode === "study_abroad" && (
+          <div className="rounded-xl border border-slate-100 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/5 text-left">
+            <h4 className="mb-4 flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-200">
+              <div className="flex h-6 w-6 items-center justify-center rounded bg-slate-200 dark:bg-slate-700">
+                <Globe size={12} className="text-slate-700 dark:text-slate-200" />
+              </div>
+              Study Abroad Custom Data
+            </h4>
+            <div className="grid grid-cols-3 gap-6">
+              <div>
+                <span className="mb-1 block text-[11px] font-semibold text-slate-500">Preferred Country</span>
+                <p className="text-sm font-semibold text-slate-900 dark:text-white">{(selectedLead.industry_data as any)?.preferred_country || "N/A"}</p>
+              </div>
+              <div>
+                <span className="mb-1 block text-[11px] font-semibold text-slate-500">Financial Status</span>
+                <p className="text-sm font-semibold text-slate-900 dark:text-white">{(selectedLead.industry_data as any)?.financial_status || "N/A"}</p>
+              </div>
+              <div className="col-span-3">
+                <span className="mb-1 block text-[11px] font-semibold text-slate-500">Countries Applied For</span>
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {((selectedLead.industry_data as any)?.countries_applied as string[] || []).length > 0 ? (
+                    ((selectedLead.industry_data as any)?.countries_applied as string[]).map((country) => (
+                      <span key={country} className="rounded-full bg-indigo-500/15 px-2.5 py-0.5 text-xs font-semibold text-indigo-700 dark:text-indigo-300">
+                        {country}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-xs text-slate-500 italic">None specified</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="rounded-xl border border-slate-100 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/5 text-left">
+          <h4 className="mb-4 flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-200">
+            <div className="flex h-6 w-6 items-center justify-center rounded bg-slate-200 dark:bg-slate-700">
+              <FileText size={12} className="text-slate-700 dark:text-slate-200" />
+            </div>
+            Documents & Attachments (IELTS, Passport, NID, etc.)
+          </h4>
+
+          {leadDocError && (
+            <div className="mb-3 text-xs text-rose-500 bg-rose-500/10 p-3 rounded-xl border border-rose-500/20">{leadDocError}</div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl border border-white/50 bg-white/20 dark:bg-white/5 dark:border-white/10 mb-4">
+            <select
+              id="counselor_doc_type"
+              defaultValue="passport"
+              className="h-10 px-3 rounded-lg border border-slate-200 bg-white dark:bg-slate-800 text-xs text-slate-700 dark:text-slate-200 outline-none focus:border-brand-500"
+            >
+              <option value="passport">Passport</option>
+              <option value="nid">National ID (NID)</option>
+              <option value="ielts">IELTS Score Card</option>
+              <option value="medical">Medical Report</option>
+              <option value="certificates">Academic Certificates</option>
+              <option value="other">Other Supporting File</option>
+            </select>
+            
+            <input
+              type="file"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                const docType = (document.getElementById("counselor_doc_type") as HTMLSelectElement)?.value || "passport";
+                if (file) {
+                  void handleLeadDocUpload(docType, file);
+                }
+              }}
+              className="text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-brand-500/10 file:text-brand-600 hover:file:bg-brand-500/20 cursor-pointer"
+            />
+            {leadDocUploading && <Loader2 size={16} className="animate-spin text-brand-500" />}
+          </div>
+
+          {leadDocuments.length === 0 ? (
+            <p className="text-xs text-slate-500 italic text-center py-4">No documents uploaded yet.</p>
+          ) : (
+            <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
+              {leadDocuments.map((doc) => (
+                <div key={doc.id} className="flex items-center justify-between gap-3 p-2.5 rounded-xl border border-white/20 bg-white/30 dark:bg-white/5 dark:border-white/10">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <FileText size={14} className="text-brand-500" />
+                    <div className="min-w-0">
+                      <span className="block text-xs font-bold text-slate-800 dark:text-slate-200 truncate max-w-[200px]" title={doc.name}>
+                        {doc.name}
+                      </span>
+                      <span className="block text-[9px] font-extrabold uppercase text-slate-500 mt-0.5">
+                        {doc.file_type}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex gap-1.5 shrink-0">
+                    <a
+                      href={getFullFileUrl(doc.file_url)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs transition-colors"
+                      title="Open file"
+                    >
+                      <Globe size={11} />
+                    </a>
+                    <button
+                      onClick={() => void handleDeleteLeadDoc(doc.id)}
+                      className="flex h-7 w-7 items-center justify-center rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 text-xs transition-colors"
+                      title="Delete document"
+                    >
+                      <Trash2 size={11} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {selectedLead.converted_customer_id && (
+          <div className="rounded-xl border border-slate-100 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/5 text-left">
+            <h4 className="mb-4 flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-200">
+              <div className="flex h-6 w-6 items-center justify-center rounded bg-emerald-500 text-white">
+                <Globe size={12} className="text-white" />
+              </div>
+              Customer Portal Documents
+            </h4>
+            
+            {customerDocuments.length === 0 ? (
+              <p className="text-xs text-slate-500 italic text-center py-4">No documents uploaded by customer yet.</p>
+            ) : (
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
+                {customerDocuments.map((doc) => (
+                  <div key={doc.id} className="flex items-center justify-between gap-3 p-2.5 rounded-xl border border-white/20 bg-white/30 dark:bg-white/5 dark:border-white/10">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <FileText size={14} className="text-brand-500" />
+                      <div className="min-w-0">
+                        <span className="block text-xs font-bold text-slate-800 dark:text-slate-200 truncate max-w-[200px]" title={doc.name}>
+                          {doc.name}
+                        </span>
+                        <span className="block text-[9px] font-extrabold uppercase text-slate-500 mt-0.5">
+                          {doc.file_type}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex gap-1.5 shrink-0">
+                      <a
+                        href={getFullFileUrl(doc.file_url)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs transition-colors"
+                        title="Open file"
+                      >
+                        <Globe size={11} />
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     );
   }
@@ -910,6 +1397,16 @@ function LeadsContent() {
             <h1 className="mt-1 text-2xl font-bold text-slate-900 dark:text-white">Lead Operations</h1>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={handleExport}
+              className="flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800 px-4 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 sm:h-10"
+            >
+              Export
+            </button>
+            <label className="flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800 px-4 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer sm:h-10">
+              Import CSV
+              <input type="file" accept=".csv" onChange={handleBulkUpload} className="hidden" />
+            </label>
             <button
               onClick={() => { setError(null); setCreateLeadOpen(true); }}
               className="flex h-11 items-center gap-2 rounded-xl bg-brand-600 px-4 text-sm font-bold text-white shadow-glow transition hover:bg-brand-500 sm:h-10"
@@ -1158,16 +1655,39 @@ function LeadsContent() {
                       value={leadAreaId}
                       onChange={setLeadAreaId}
                       icon={Globe}
-                      placeholder="Area"
-                      options={[{ value: "", label: "No Area" }, ...configs.areas.map((item) => ({ value: item.id, label: item.name }))]}
+                      placeholder="Location"
+                      options={[{ value: "", label: "No Location" }, ...configs.areas.map((item) => ({ value: item.id, label: item.name }))]}
                     />
+                    {orgTypeCode === "study_abroad" ? (
+                      <label className="relative block">
+                        <User size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                        <input
+                          name="last_education"
+                          value={lastEducation}
+                          onChange={(event) => setLastEducation(event.target.value)}
+                          className="h-11 w-full rounded-xl border border-white/40 bg-white/50 py-2 pl-11 pr-4 text-sm text-slate-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-400/20 dark:border-white/10 dark:bg-black/30 dark:text-white"
+                          placeholder="Last Education"
+                        />
+                      </label>
+                    ) : (
+                      <ThemedSelect
+                        name="lead_profession_id"
+                        value={leadProfessionId}
+                        onChange={setLeadProfessionId}
+                        icon={Briefcase}
+                        placeholder="Profession"
+                        options={[{ value: "", label: "No Profession" }, ...configs.professions.map((item) => ({ value: item.id, label: item.name }))]}
+                      />
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
                     <ThemedSelect
-                      name="lead_profession_id"
-                      value={leadProfessionId}
-                      onChange={setLeadProfessionId}
+                      name="assigned_user_id"
+                      value={leadAssignedUserId}
+                      onChange={setLeadAssignedUserId}
                       icon={User}
-                      placeholder="Profession"
-                      options={[{ value: "", label: "No Profession" }, ...configs.professions.map((item) => ({ value: item.id, label: item.name }))]}
+                      placeholder="Assigned To"
+                      options={[{ value: "", label: "Unassigned" }, ...users.map((u) => ({ value: u.id, label: u.name || u.email || u.id }))]}
                     />
                   </div>
                   <label className="relative block">
@@ -1176,7 +1696,7 @@ function LeadsContent() {
                       value={address}
                       onChange={(event) => setAddress(event.target.value)}
                       className="h-11 w-full rounded-xl border border-white/40 bg-white/50 py-2 pl-11 pr-4 text-sm text-slate-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-400/20 dark:border-white/10 dark:bg-black/30 dark:text-white"
-                      placeholder="Address / Location"
+                      placeholder="Precise Address (e.g. House, Road)"
                     />
                   </label>
                 </div>
@@ -1235,8 +1755,31 @@ function LeadsContent() {
               </div>
             </div>
 
+            <div className="mt-6 rounded-2xl border border-white/20 bg-white/30 p-4 dark:border-white/10 dark:bg-white/5 text-left animate-fade-up">
+              <span className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-brand-500">Collaborating Counselor Assignments</span>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-1 max-h-32 overflow-y-auto p-2.5 bg-white/20 dark:bg-black/20 rounded-xl">
+                {users.map((u) => (
+                  <label key={u.id} className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={leadAssignedUserIds.includes(u.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setLeadAssignedUserIds([...leadAssignedUserIds, u.id]);
+                        } else {
+                          setLeadAssignedUserIds(leadAssignedUserIds.filter(id => id !== u.id));
+                        }
+                      }}
+                      className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 dark:border-slate-700 dark:bg-slate-800"
+                    />
+                    <span>{u.name || u.email || u.id}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
             {/* Dynamic Industry Context Section */}
-            {industry && ["real_estate", "study_abroad", "ecommerce"].includes(industry) && (
+            {(industry || orgTypeCode === "study_abroad") && (
               <div className="mt-8 animate-fade-up">
                 <div className="rounded-2xl border border-brand-200/50 bg-brand-50/30 p-5 dark:border-brand-500/20 dark:bg-brand-500/5">
                   <div className="mb-4 flex items-center gap-2">
@@ -1244,7 +1787,7 @@ function LeadsContent() {
                       <Sparkles size={12} />
                     </div>
                     <h4 className="text-xs font-bold uppercase tracking-widest text-brand-600 dark:text-brand-400">
-                      Contextual Details: {industry.replace(/_/g, " ")}
+                      Contextual Details: {(industry || orgTypeCode || "").replace(/_/g, " ")}
                     </h4>
                   </div>
 
@@ -1274,7 +1817,7 @@ function LeadsContent() {
                       </>
                     )}
 
-                    {industry === "study_abroad" && (
+                    {(industry === "study_abroad" || orgTypeCode === "study_abroad") && (
                       <>
                         <ThemedSelect
                           value={(industryData?.preferred_country as string) || ""}
@@ -1298,6 +1841,47 @@ function LeadsContent() {
                             placeholder="Financial Status"
                           />
                         </label>
+                        <div className="col-span-2">
+                          <label className="block text-left mb-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                            Countries Applied For
+                          </label>
+                          <input
+                            value={countryInput}
+                            onChange={(e) => setCountryInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === ",") {
+                                e.preventDefault();
+                                const nextVal = e.currentTarget.value.trim();
+                                if (nextVal) {
+                                  const existing = (industryData?.countries_applied as string[]) || [];
+                                  if (!existing.includes(nextVal)) {
+                                    updateIndustryField("countries_applied", [...existing, nextVal]);
+                                  }
+                                }
+                                setCountryInput("");
+                              }
+                            }}
+                            className="h-10 w-full rounded-xl border border-white/40 bg-white/60 px-3 text-sm text-slate-900 outline-none transition focus:border-brand-400 dark:border-white/10 dark:bg-black/30 dark:text-white"
+                            placeholder="Type country and press Enter/comma"
+                          />
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {((industryData?.countries_applied as string[]) || []).map((country) => (
+                              <span key={country} className="flex items-center gap-1 rounded-full bg-indigo-500/10 px-2 py-0.5 text-[10px] font-semibold text-indigo-600 dark:text-indigo-300">
+                                {country}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const existing = (industryData?.countries_applied as string[]) || [];
+                                    updateIndustryField("countries_applied", existing.filter(c => c !== country));
+                                  }}
+                                  className="text-slate-400 hover:text-slate-600"
+                                >
+                                  <X size={8} />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
                       </>
                     )}
 
@@ -1403,7 +1987,28 @@ function LeadsContent() {
                   type="search"
                 />
               </div>
-              <div className={`flex w-full flex-wrap items-center gap-2 sm:w-auto ${viewMode === 'board' ? 'hidden' : ''}`}>
+              <div className={`flex w-full flex-wrap items-center gap-2 sm:w-auto`}>
+                <ThemedSelect
+                  value={branchFilter}
+                  onChange={setBranchFilter}
+                  icon={Building2}
+                  placeholder="-- Branch --"
+                  className="w-40 h-10"
+                  options={[
+                    { value: "all", label: "-- Branch --" },
+                    ...branches.map((b) => ({ value: b.id, label: b.name })),
+                  ]}
+                />
+                <select
+                  value={agentFilter}
+                  onChange={(e) => setAgentFilter(e.target.value)}
+                  className="h-10 rounded-xl border border-white/50 bg-white/50 px-3 text-xs font-semibold text-slate-700 outline-none dark:border-white/10 dark:bg-black/20 dark:text-slate-200"
+                >
+                  <option value="all">-- Agent --</option>
+                  {users.map((u) => (
+                    <option key={u.id} value={u.id}>{u.name || u.email || u.id}</option>
+                  ))}
+                </select>
                 <ThemedSelect 
                   value={statusFilter} 
                   onChange={setStatusFilter}
@@ -1596,77 +2201,119 @@ function LeadsContent() {
                   <table className="min-w-full whitespace-nowrap">
                   <thead>
                     <tr className="border-b border-white/20 bg-white/20 text-left text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-slate-400">
+                      <th className="px-5 py-4 w-10">
+                        <input
+                          type="checkbox"
+                          checked={filteredLeads.length > 0 && selectedLeadIds.length === filteredLeads.length}
+                          onChange={handleSelectAll}
+                          className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 dark:border-slate-700 dark:bg-slate-800 cursor-pointer"
+                        />
+                      </th>
+                      <th className="px-5 py-4 w-12 text-center">#</th>
                       <th className="px-5 py-4">Date</th>
                       <th className="px-5 py-4">Name</th>
                       <th className="px-5 py-4">Phone</th>
-                      <th className="px-5 py-4">Profession</th>
+                      <th className="px-5 py-4">{orgTypeCode === "study_abroad" ? "Last Education" : "Profession"}</th>
+                      <th className="px-5 py-4">Location</th>
                       <th className="px-5 py-4">Stage</th>
                       <th className="px-5 py-4">Assigned To</th>
-                      <th className="px-5 py-4">Created By</th>
+                      <th className="px-5 py-4">Source</th>
                       <th className="px-5 py-4 text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/10">
-                    {filteredLeads.map((lead) => (
-                      <tr
-                        key={lead.id}
-                        onClick={() => { openLead(lead.id); }}
-                        className={`cursor-pointer transition hover:bg-white/40 dark:hover:bg-white/10 ${selectedId === lead.id ? "bg-brand-500/8 dark:bg-brand-500/10 ring-1 ring-inset ring-brand-500/20" : ""}`}
-                      >
-                        <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">{formatDate(lead.created_at)}</td>
-                        <td className="px-5 py-4 text-sm font-semibold text-slate-800 dark:text-slate-100">
-                          <div className="flex items-center gap-2">
-                            {lead.untouched ? <span className="rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-bold text-rose-600 dark:text-rose-300">NEW</span> : null}
-                            {lead.company_name}
-                          </div>
-                          {lead.tags?.length ? (
-                            <div className="mt-2 flex flex-wrap gap-1">
-                              {lead.tags.slice(0, 3).map((tag) => (
-                                <span key={tag} className="rounded-full bg-brand-500/10 px-2 py-0.5 text-[10px] font-semibold text-brand-600 dark:text-brand-300">
-                                  {tagLabel(tag)}
-                                </span>
-                              ))}
+                    {filteredLeads.map((lead, index) => {
+                      const isSelected = selectedLeadIds.includes(lead.id);
+                      return (
+                        <tr
+                          key={lead.id}
+                          onClick={() => { openLead(lead.id); }}
+                          className={`cursor-pointer transition hover:bg-white/40 dark:hover:bg-white/10 ${
+                            isSelected 
+                              ? "bg-brand-500/10 dark:bg-brand-500/15" 
+                              : selectedId === lead.id 
+                                ? "bg-brand-500/8 dark:bg-brand-500/10 ring-1 ring-inset ring-brand-500/20" 
+                                : ""
+                          }`}
+                        >
+                          <td className="px-5 py-4 w-10" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => handleSelectLead(lead.id)}
+                              className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 dark:border-slate-700 dark:bg-slate-800 cursor-pointer"
+                            />
+                          </td>
+                          <td className="px-5 py-4 w-12 text-center text-xs font-semibold text-slate-500 dark:text-slate-400">
+                            {index + 1}
+                          </td>
+                          <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">{formatDate(lead.created_at)}</td>
+                          <td className="px-5 py-4 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                            <div className="flex items-center gap-2">
+                              {lead.untouched ? <span className="rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-bold text-rose-600 dark:text-rose-300">NEW</span> : null}
+                              {lead.company_name}
                             </div>
-                          ) : null}
-                        </td>
-                        <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">{lead.phone || "-"}</td>
-                        <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300 capitalize">
-                           {(lead.industry_data as any)?.profession || lead.industry || "—"}
-                        </td>
-                        <td className="px-5 py-4">
-                          <span className={`rounded-lg px-2.5 py-1 text-[11px] font-bold ${stageTone(configs.stages.find((item) => item.id === lead.lead_stage_id)?.name, lead.status)}`}>
-                            {configs.stages.find((item) => item.id === lead.lead_stage_id)?.name ?? lead.status}
-                          </span>
-                        </td>
-                        <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">{users.find(u => u.id === lead.assigned_user_id)?.name || lead.assigned_user_id || "-"}</td>
-                        <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">Admin</td>
-                        <td className="px-5 py-4 text-right" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center justify-end gap-1.5 text-slate-400">
-                            <button onClick={() => { openLead(lead.id); }} className="rounded p-1.5 hover:bg-white/60 hover:text-brand-500 dark:hover:bg-white/10">
-                              <Eye size={16} />
-                            </button>
-                            {currentUser?.role === "admin" && (
-                              <button onClick={() => void deleteLead(lead.id)} className="rounded p-1.5 hover:bg-rose-500/10 hover:text-rose-500">
-                                <Trash2 size={16} />
+                            {lead.tags?.length ? (
+                              <div className="mt-2 flex flex-wrap gap-1">
+                                {lead.tags.slice(0, 3).map((tag) => (
+                                  <span key={tag} className="rounded-full bg-brand-500/10 px-2 py-0.5 text-[10px] font-semibold text-brand-600 dark:text-brand-300">
+                                    {tagLabel(tag)}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
+                          </td>
+                          <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">{lead.phone || "-"}</td>
+                          <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300 capitalize">
+                             {orgTypeCode === "study_abroad" 
+                               ? (lead.last_education || "—") 
+                               : (configs.professions.find((p) => p.id === lead.lead_profession_id)?.name || "—")}
+                          </td>
+                          <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">
+                             {configs.areas.find((area) => area.id === lead.lead_area_id)?.name || "—"}
+                          </td>
+                          <td className="px-5 py-4">
+                            <span className={`rounded-lg px-2.5 py-1 text-[11px] font-bold ${stageTone(configs.stages.find((item) => item.id === lead.lead_stage_id)?.name, lead.status)}`}>
+                              {configs.stages.find((item) => item.id === lead.lead_stage_id)?.name ?? lead.status}
+                            </span>
+                          </td>
+                          <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">
+                            {users.find(u => u.id === lead.assigned_user_id)?.name || lead.assigned_user_id || "Unassigned"}
+                          </td>
+                          <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300 capitalize">
+                            <div className="flex items-center gap-1.5">
+                              <SourceIcon source={lead.source} className="h-4 w-4 text-brand-500 shrink-0" />
+                              <span>{configs.sources.find(s => s.id === lead.lead_source_id)?.name || lead.source || "unsourced"}</span>
+                            </div>
+                          </td>
+                          <td className="px-5 py-4 text-right" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-end gap-1.5 text-slate-400">
+                              <button onClick={() => { openLead(lead.id); }} className="rounded p-1.5 hover:bg-white/60 hover:text-brand-500 dark:hover:bg-white/10">
+                                <Eye size={16} />
                               </button>
-                            )}
-                            <div className="relative">
-                              <button onClick={(e) => { e.stopPropagation(); setActionDropdownId(actionDropdownId === lead.id ? null : lead.id) }} className="rounded p-1.5 hover:bg-white/60 hover:text-emerald-500 dark:hover:bg-white/10">
-                                <Edit2 size={16} />
-                              </button>
-                              {actionDropdownId === lead.id && (
-                                <div className="absolute right-0 top-full mt-1 w-40 rounded-xl bg-white shadow-xl border border-slate-100 dark:bg-slate-800 dark:border-slate-700 z-50 overflow-hidden text-left" onMouseLeave={() => setActionDropdownId(null)}>
-                                  <button onClick={(e) => { e.stopPropagation(); setError(null); setEditModalLeadId(lead.id); setActionDropdownId(null); }} className="w-full text-left px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700 flex items-center gap-2"><Edit2 size={14} /> Edit Lead</button>
-                                  {currentUser?.role === "admin" && (
-                                    <button onClick={(e) => { e.stopPropagation(); setBudgetModalLeadId(lead.id); setActionDropdownId(null); }} className="w-full text-left px-4 py-2 text-sm font-semibold text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 flex items-center gap-2"><CheckCircle2 size={14} /> Convert</button>
-                                  )}
-                                </div>
+                              {currentUser?.role === "admin" && (
+                                <button onClick={() => void deleteLead(lead.id)} className="rounded p-1.5 hover:bg-rose-500/10 hover:text-rose-500">
+                                  <Trash2 size={16} />
+                                </button>
                               )}
+                              <div className="relative">
+                                <button onClick={(e) => { e.stopPropagation(); setActionDropdownId(actionDropdownId === lead.id ? null : lead.id) }} className="rounded p-1.5 hover:bg-white/60 hover:text-emerald-500 dark:hover:bg-white/10">
+                                  <Edit2 size={16} />
+                                </button>
+                                {actionDropdownId === lead.id && (
+                                  <div className="absolute right-0 top-full mt-1 w-40 rounded-xl bg-white shadow-xl border border-slate-100 dark:bg-slate-800 dark:border-slate-700 z-50 overflow-hidden text-left" onMouseLeave={() => setActionDropdownId(null)}>
+                                    <button onClick={(e) => { e.stopPropagation(); setError(null); setEditModalLeadId(lead.id); setActionDropdownId(null); }} className="w-full text-left px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700 flex items-center gap-2"><Edit2 size={14} /> Edit Lead</button>
+                                    {currentUser?.role === "admin" && (
+                                      <button onClick={(e) => { e.stopPropagation(); setBudgetModalLeadId(lead.id); setActionDropdownId(null); }} className="w-full text-left px-4 py-2 text-sm font-semibold text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 flex items-center gap-2"><CheckCircle2 size={14} /> Convert</button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
                 </div>
@@ -1714,7 +2361,8 @@ function LeadsContent() {
         if (!selectedLead) return null;
         return (
           <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/40 backdrop-blur-sm">
-            <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl border border-white/20 bg-white shadow-2xl dark:bg-slate-900 animate-fade-up">
+            <div className="w-full max-w-4xl max-h-[90vh] flex flex-col rounded-2xl border border-white/20 bg-white shadow-2xl dark:bg-slate-900 animate-fade-up">
+              {/* Header with sticky close button */}
               <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white/80 px-6 py-4 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/80">
                 <div>
                   <h2 className="text-lg font-bold text-slate-900 dark:text-white">Edit Lead</h2>
@@ -1724,18 +2372,22 @@ function LeadsContent() {
                   <X size={16} />
                 </button>
               </div>
-              <div className="p-6">
+
+              {/* Scrollable form container */}
+              <div className="flex-1 overflow-y-auto p-6">
                 {error ? (
                   <p className="mb-4 rounded-xl border border-rose-200 bg-rose-50/80 px-4 py-3 text-sm text-rose-700 backdrop-blur-md dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300">
                     {error}
                   </p>
                 ) : null}
+
                 <form
-                  className="space-y-3"
+                  className="space-y-4"
                   onSubmit={(event) => {
                     event.preventDefault();
                     const form = new FormData(event.currentTarget);
                     const stageId = String(form.get("lead_stage_id") || "");
+                    const professionId = form.get("lead_profession_id") ? String(form.get("lead_profession_id")) : "";
                     void updateLead(selectedLead.id, {
                       company_name: String(form.get("company_name") || selectedLead.company_name),
                       contact_person: String(form.get("contact_person") || "") || null,
@@ -1744,140 +2396,307 @@ function LeadsContent() {
                       priority: String(form.get("priority") || "medium"),
                       lead_stage_id: stageId || null,
                       lead_area_id: String(form.get("lead_area_id") || "") || null,
-                      lead_profession_id: String(form.get("lead_profession_id") || "") || null,
+                      last_education: String(form.get("last_education") || "") || null,
+                      lead_profession_id: professionId || null,
                       assigned_user_id: String(form.get("assigned_user_id") || "") || null,
+                      assigned_user_ids: editAssignedUserIds,
+                      lead_source_id: String(form.get("lead_source_id") || "") || null,
+                      address: String(form.get("address") || "") || null,
                       tags: editTags,
                       ai_instructions: aiInstructions || null,
+                      industry_data: editIndustryData || null,
                       status: configs.stages.find((stage) => stage.id === stageId)?.name.toLowerCase().replace(/\s+/g, "_") || selectedLead.status,
                     });
                   }}
                 >
-                  <label className="block">
-                    <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Company Name</span>
-                    <input name="company_name" defaultValue={selectedLead.company_name} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
-                  </label>
-                  <label className="block">
-                    <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Contact Person</span>
-                    <input name="contact_person" defaultValue={selectedLead.contact_person ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
-                  </label>
-                  <label className="block">
-                    <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Phone</span>
-                    <input
-                      name="phone"
-                      value={editPhone}
-                      onChange={(e) => setEditPhone(e.target.value)}
-                      className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
-                    />
-                    {editPhoneWarning && (
-                      <p className="text-[11px] font-semibold text-rose-500 mt-1 dark:text-rose-400">
-                        ⚠️ {editPhoneWarning}
-                      </p>
-                    )}
-                  </label>
-                  <label className="block">
-                    <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Email</span>
-                    <input name="email" defaultValue={selectedLead.email ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="block">
-                      <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Priority</span>
-                      <UncontrolledThemedSelect
-                        name="priority"
-                        defaultValue={selectedLead.priority ?? "medium"}
-                        placeholder="Priority"
-                        icon={Zap}
-                        options={[
-                          { value: "high", label: "High" },
-                          { value: "medium", label: "Medium" },
-                          { value: "low", label: "Low" },
-                        ]}
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Stage</span>
-                      <UncontrolledThemedSelect
-                        name="lead_stage_id"
-                        defaultValue={selectedLead.lead_stage_id ?? ""}
-                        placeholder="Stage"
-                        icon={Filter}
-                        options={[{ value: "", label: "No Stage" }, ...configs.stages.map((stage) => ({ value: stage.id, label: stage.name }))]}
-                      />
-                    </label>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="block">
-                      <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Area</span>
-                      <UncontrolledThemedSelect
-                        name="lead_area_id"
-                        defaultValue={selectedLead.lead_area_id ?? ""}
-                        placeholder="Area"
-                        icon={Globe}
-                        options={[{ value: "", label: "No Area" }, ...configs.areas.map((area) => ({ value: area.id, label: area.name }))]}
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Profession</span>
-                      <UncontrolledThemedSelect
-                        name="lead_profession_id"
-                        defaultValue={selectedLead.lead_profession_id ?? ""}
-                        placeholder="Profession"
-                        icon={User}
-                        options={[{ value: "", label: "No Profession" }, ...configs.professions.map((profession) => ({ value: profession.id, label: profession.name }))]}
-                      />
-                    </label>
-                  </div>
-                  <label className="block">
-                    <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Assigned To</span>
-                    <UncontrolledThemedSelect
-                      name="assigned_user_id"
-                      defaultValue={selectedLead.assigned_user_id ?? ""}
-                      placeholder="Unassigned"
-                      icon={User}
-                      options={[{ value: "", label: "Unassigned" }, ...users.map((u) => ({ value: u.id, label: u.name || u.email || u.id }))]}
-                    />
-                  </label>
-                  <div className="rounded-2xl border border-white/20 bg-white/30 p-4 dark:border-white/10 dark:bg-white/5">
-                    <div className="mb-2 flex items-center justify-between">
-                      <span className="text-[11px] font-bold uppercase text-slate-500">Tags</span>
-                      <span className="text-[10px] text-slate-400">Press Enter or comma to add</span>
+                  {/* Basic Information Card */}
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/5">
+                    <h4 className="mb-4 flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-200">
+                      <div className="flex h-6 w-6 items-center justify-center rounded bg-slate-200 dark:bg-slate-700">
+                        <Info size={12} className="text-slate-700 dark:text-slate-200" />
+                      </div>
+                      Basic Information
+                    </h4>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <label className="block text-left">
+                        <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Company Name</span>
+                        <input name="company_name" defaultValue={selectedLead.company_name} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-900 outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+                      </label>
+                      <label className="block text-left">
+                        <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Contact Person</span>
+                        <input name="contact_person" defaultValue={selectedLead.contact_person ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-900 outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+                      </label>
+                      <label className="block text-left">
+                        <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Phone</span>
+                        <input
+                          name="phone"
+                          value={editPhone}
+                          onChange={(e) => setEditPhone(e.target.value)}
+                          className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-900 outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+                        />
+                        {editPhoneWarning && (
+                          <p className="text-[11px] font-semibold text-rose-500 mt-1 dark:text-rose-400">
+                            ⚠️ {editPhoneWarning}
+                          </p>
+                        )}
+                      </label>
+                      <label className="block text-left">
+                        <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Email</span>
+                        <input name="email" defaultValue={selectedLead.email ?? ""} className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-900 outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+                      </label>
+                      <label className="block text-left">
+                        <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Source</span>
+                        <UncontrolledThemedSelect
+                          name="lead_source_id"
+                          defaultValue={selectedLead.lead_source_id ?? ""}
+                          placeholder="Source"
+                          icon={Globe}
+                          options={[{ value: "", label: "Manual" }, ...configs.sources.map((s) => ({ value: s.id, label: s.name }))]}
+                        />
+                      </label>
+                      <label className="block text-left">
+                        <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Assigned To</span>
+                        <UncontrolledThemedSelect
+                          name="assigned_user_id"
+                          defaultValue={selectedLead.assigned_user_id ?? ""}
+                          placeholder="Unassigned"
+                          icon={User}
+                          options={[{ value: "", label: "Unassigned" }, ...users.map((u) => ({ value: u.id, label: u.name || u.email || u.id }))]}
+                        />
+                      </label>
+                      <label className="block text-left">
+                        <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Location</span>
+                        <UncontrolledThemedSelect
+                          name="lead_area_id"
+                          defaultValue={selectedLead.lead_area_id ?? ""}
+                          placeholder="Location"
+                          icon={Globe}
+                          options={[{ value: "", label: "No Location" }, ...configs.areas.map((area) => ({ value: area.id, label: area.name }))]}
+                        />
+                      </label>
+                      <label className="block text-left md:col-span-2">
+                        <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Address</span>
+                        <input name="address" defaultValue={selectedLead.address ?? ""} placeholder="Precise Address (e.g. House, Road)" className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-900 outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+                      </label>
                     </div>
-                    <input
-                      value={editTagInput}
-                      onChange={(event) => setEditTagInput(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === ",") {
-                          event.preventDefault();
-                          addEditTags(editTagInput);
-                          setEditTagInput("");
-                        }
-                      }}
-                      className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
-                      placeholder="vip, hot, follow-up"
-                    />
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {editTags.length ? (
-                        editTags.map((tag) => (
-                          <button
-                            key={tag}
-                            type="button"
-                            onClick={() => setEditTags((current) => current.filter((item) => item !== tag))}
-                            className="flex items-center gap-1 rounded-full bg-brand-500/10 px-3 py-1 text-[11px] font-semibold text-brand-600 transition hover:bg-brand-500/20 dark:text-brand-300"
-                          >
-                            {tagLabel(tag)}
-                            <X size={12} />
-                          </button>
-                        ))
-                      ) : (
-                        <span className="text-xs text-slate-400">No tags yet</span>
+                  </div>
+
+                  {/* Lead Status and Tags & Instructions side-by-side */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Lead Status Card */}
+                    <div className="rounded-xl border border-slate-100 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/5 text-left">
+                      <h4 className="mb-4 flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-200">
+                        <div className="flex h-6 w-6 items-center justify-center rounded bg-slate-200 dark:bg-slate-700">
+                          <Flag size={12} className="text-slate-700 dark:text-slate-200" />
+                        </div>
+                        Lead Status
+                      </h4>
+                      <div className="space-y-4">
+                        <label className="block">
+                          <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Stage</span>
+                          <UncontrolledThemedSelect
+                            name="lead_stage_id"
+                            defaultValue={selectedLead.lead_stage_id ?? ""}
+                            placeholder="Stage"
+                            icon={Filter}
+                            options={[{ value: "", label: "No Stage" }, ...configs.stages.map((stage) => ({ value: stage.id, label: stage.name }))]}
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Priority</span>
+                          <UncontrolledThemedSelect
+                            name="priority"
+                            defaultValue={selectedLead.priority ?? "medium"}
+                            placeholder="Priority"
+                            icon={Zap}
+                            options={[
+                              { value: "high", label: "High" },
+                              { value: "medium", label: "Medium" },
+                              { value: "low", label: "Low" },
+                            ]}
+                          />
+                        </label>
+                        {orgTypeCode === "study_abroad" ? (
+                          <label className="block text-left">
+                            <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Last Education</span>
+                            <input
+                              name="last_education"
+                              defaultValue={selectedLead.last_education ?? ""}
+                              className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-900 outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+                              placeholder="Last Education"
+                            />
+                          </label>
+                        ) : (
+                          <label className="block text-left">
+                            <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Profession</span>
+                            <UncontrolledThemedSelect
+                              name="lead_profession_id"
+                              defaultValue={selectedLead.lead_profession_id ?? ""}
+                              placeholder="Profession"
+                              icon={Briefcase}
+                              options={[{ value: "", label: "No Profession" }, ...configs.professions.map((item) => ({ value: item.id, label: item.name }))]}
+                            />
+                          </label>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Tags & Instructions Card */}
+                    <div className="rounded-xl border border-slate-100 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/5 flex flex-col justify-between text-left">
+                      <div>
+                        <h4 className="mb-4 flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-200">
+                          <div className="flex h-6 w-6 items-center justify-center rounded bg-slate-200 dark:bg-slate-700">
+                            <Sparkles size={12} className="text-slate-700 dark:text-slate-200" />
+                          </div>
+                          Tags & Instructions
+                        </h4>
+
+                        <div className="rounded-xl border border-white/20 bg-white/30 p-3 dark:border-white/10 dark:bg-white/5 mb-4">
+                          <div className="mb-2 flex items-center justify-between">
+                            <span className="text-[11px] font-bold uppercase text-slate-500">Tags</span>
+                            <span className="text-[9px] text-slate-400">Press Enter or comma</span>
+                          </div>
+                          <input
+                            value={editTagInput}
+                            onChange={(event) => setEditTagInput(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === ",") {
+                                event.preventDefault();
+                                addEditTags(editTagInput);
+                                setEditTagInput("");
+                              }
+                            }}
+                            className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+                            placeholder="vip, hot, follow-up"
+                          />
+                          <div className="mt-2.5 flex flex-wrap gap-1.5 max-h-20 overflow-y-auto">
+                            {editTags.length ? (
+                              editTags.map((tag) => (
+                                <button
+                                  key={tag}
+                                  type="button"
+                                  onClick={() => setEditTags((current) => current.filter((item) => item !== tag))}
+                                  className="flex items-center gap-1 rounded-full bg-brand-500/10 px-2 py-0.5 text-[10px] font-semibold text-brand-600 transition hover:bg-brand-500/20 dark:text-brand-300"
+                                >
+                                  {tagLabel(tag)}
+                                  <X size={10} />
+                                </button>
+                              ))
+                            ) : (
+                              <span className="text-xs text-slate-400">No tags yet</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <label className="block text-left">
+                        <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">AI Instructions</span>
+                        <textarea value={aiInstructions} onChange={(event) => setAiInstructions(event.target.value)} rows={2} className="w-full rounded-xl border border-white/50 bg-white/50 px-3 py-2 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
+                      </label>
+
+                      <div className="col-span-1 md:col-span-2 mt-4 text-left">
+                        <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Collaborating Counselor Assignments</span>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-1 max-h-32 overflow-y-auto p-3 bg-white/50 dark:bg-black/20 rounded-xl border border-white/50 dark:border-white/10">
+                          {users.map((u) => (
+                            <label key={u.id} className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-200 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={editAssignedUserIds.includes(u.id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setEditAssignedUserIds([...editAssignedUserIds, u.id]);
+                                  } else {
+                                    setEditAssignedUserIds(editAssignedUserIds.filter(id => id !== u.id));
+                                  }
+                                }}
+                                className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 dark:border-slate-700 dark:bg-slate-800"
+                              />
+                              <span>{u.name || u.email || u.id}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+
+                      {orgTypeCode === "study_abroad" && (
+                        <div className="rounded-xl border border-slate-100 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/5 text-left mt-4">
+                          <h4 className="mb-4 flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-200">
+                            <div className="flex h-6 w-6 items-center justify-center rounded bg-slate-200 dark:bg-slate-700">
+                              <Sparkles size={12} className="text-slate-700 dark:text-slate-200" />
+                            </div>
+                            Study Abroad Context Details
+                          </h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <label className="block text-left">
+                              <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Preferred Country</span>
+                              <select
+                                value={(editIndustryData?.preferred_country as string) || ""}
+                                onChange={(e) => updateEditIndustryField("preferred_country", e.target.value)}
+                                className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-900 outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+                              >
+                                <option value="">Select Country</option>
+                                <option value="UK">UK</option>
+                                <option value="US">US</option>
+                                <option value="AUS">AUS</option>
+                                <option value="CA">CA</option>
+                              </select>
+                            </label>
+                            <label className="block text-left">
+                              <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Financial Status</span>
+                              <input
+                                value={(editIndustryData?.financial_status as string) || ""}
+                                onChange={(e) => updateEditIndustryField("financial_status", e.target.value)}
+                                className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-900 outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+                              />
+                            </label>
+                            <div className="col-span-2">
+                              <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Countries Applied For</span>
+                              <input
+                                value={editCountryInput}
+                                onChange={(e) => setEditCountryInput(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" || e.key === ",") {
+                                    e.preventDefault();
+                                    const nextVal = e.currentTarget.value.trim();
+                                    if (nextVal) {
+                                      const existing = (editIndustryData?.countries_applied as string[]) || [];
+                                      if (!existing.includes(nextVal)) {
+                                        updateEditIndustryField("countries_applied", [...existing, nextVal]);
+                                      }
+                                    }
+                                    setEditCountryInput("");
+                                  }
+                                }}
+                                className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-900 outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+                                placeholder="Type country and press Enter/comma"
+                              />
+                              <div className="mt-2 flex flex-wrap gap-1">
+                                {((editIndustryData?.countries_applied as string[]) || []).map((country) => (
+                                  <span key={country} className="flex items-center gap-1 rounded-full bg-indigo-500/10 px-2 py-0.5 text-[10px] font-semibold text-indigo-600 dark:text-indigo-300">
+                                    {country}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const existing = (editIndustryData?.countries_applied as string[]) || [];
+                                        updateEditIndustryField("countries_applied", existing.filter(c => c !== country));
+                                      }}
+                                      className="text-slate-400 hover:text-slate-600"
+                                    >
+                                      <X size={8} />
+                                    </button>
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
                       )}
                     </div>
                   </div>
-                  <label className="block">
-                    <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">AI Instructions</span>
-                    <textarea value={aiInstructions} onChange={(event) => setAiInstructions(event.target.value)} rows={4} className="w-full rounded-xl border border-white/50 bg-white/50 px-3 py-2 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white" />
-                  </label>
-                  <div className="flex gap-2">
-                    <button type="submit" disabled={savingId === selectedLead.id || !!editPhoneWarning} className="flex-1 rounded-xl bg-brand-600 py-2.5 text-sm font-bold text-white shadow-glow transition hover:bg-brand-500 disabled:opacity-60">
+
+                  {/* Actions */}
+                  <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                    <button type="submit" disabled={savingId === selectedLead.id || !!editPhoneWarning} className="flex-1 h-11 rounded-xl bg-brand-600 text-sm font-bold text-white shadow-glow transition hover:bg-brand-500 disabled:opacity-60">
                       Save Changes
                     </button>
                     <button type="button" onClick={() => deleteLead(selectedLead.id)} className="h-11 rounded-xl bg-rose-500/10 px-4 text-sm font-semibold text-rose-600 hover:bg-rose-500/20 dark:text-rose-400">
@@ -1890,6 +2709,183 @@ function LeadsContent() {
           </div>
         );
       })()}
+
+      {selectedLeadIds.length > 0 && (
+        <>
+          {(bulkAssignOpen || bulkStageOpen) && (
+            <div className="fixed inset-0 z-[80]" onClick={() => { setBulkAssignOpen(false); setBulkStageOpen(false); }} />
+          )}
+          <div className="fixed bottom-6 left-1/2 z-[100] flex -translate-x-1/2 items-center gap-4 rounded-2xl border border-white/20 bg-white/95 p-3 shadow-2xl backdrop-blur-2xl dark:border-white/10 dark:bg-slate-900/95 animate-fade-up">
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+              {selectedLeadIds.length} leads selected
+            </span>
+            <div className="h-4 w-px bg-slate-200 dark:bg-slate-700" />
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => { setBulkAssignOpen(!bulkAssignOpen); setBulkStageOpen(false); }}
+                  className="flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                >
+                  <User size={14} />
+                  <span>Assign</span>
+                </button>
+                {bulkAssignOpen && (
+                  <div className="absolute bottom-full left-0 mb-2 w-48 max-h-60 overflow-y-auto rounded-xl border border-slate-100 bg-white p-1 shadow-2xl dark:border-slate-700 dark:bg-slate-800 z-[90]">
+                    <button
+                      type="button"
+                      onClick={() => bulkAssign("")}
+                      className="w-full rounded-lg px-3 py-2 text-left text-xs font-bold text-slate-600 hover:bg-brand-500 hover:text-white dark:text-slate-300"
+                    >
+                      Unassigned
+                    </button>
+                    {users.map((u) => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => bulkAssign(u.id)}
+                        className="w-full rounded-lg px-3 py-2 text-left text-xs font-bold text-slate-600 hover:bg-brand-500 hover:text-white dark:text-slate-300"
+                      >
+                        {u.name || u.email || u.id}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => { setBulkStageOpen(!bulkStageOpen); setBulkAssignOpen(false); }}
+                  className="flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                >
+                  <Filter size={14} />
+                  <span>Change Stage</span>
+                </button>
+                {bulkStageOpen && (
+                  <div className="absolute bottom-full left-0 mb-2 w-48 max-h-60 overflow-y-auto rounded-xl border border-slate-100 bg-white p-1 shadow-2xl dark:border-slate-700 dark:bg-slate-800 z-[90]">
+                    <button
+                      type="button"
+                      onClick={() => bulkChangeStage("")}
+                      className="w-full rounded-lg px-3 py-2 text-left text-xs font-bold text-slate-600 hover:bg-brand-500 hover:text-white dark:text-slate-300"
+                    >
+                      No Stage
+                    </button>
+                    {configs.stages.map((stage) => (
+                      <button
+                        key={stage.id}
+                        type="button"
+                        onClick={() => bulkChangeStage(stage.id)}
+                        className="w-full rounded-lg px-3 py-2 text-left text-xs font-bold text-slate-600 hover:bg-brand-500 hover:text-white dark:text-slate-300"
+                      >
+                        {stage.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/api/v1";
+                  const params = new URLSearchParams();
+                  selectedLeadIds.forEach((id) => params.append("lead_ids", id));
+                  window.open(`${baseUrl}/leads/export?${params.toString()}`);
+                }}
+                className="flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              >
+                <FileText size={14} />
+                <span>Export CSV</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsBulkShareOpen(true);
+                  setBulkShareLinks([]);
+                  setBulkShareError(null);
+                }}
+                className="flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              >
+                <Globe size={14} />
+                <span>Bulk Share</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={bulkDelete}
+                className="flex h-10 items-center gap-1.5 rounded-xl bg-rose-50 px-4 text-xs font-bold text-rose-600 hover:bg-rose-100 dark:bg-rose-950/20 dark:text-rose-400 dark:hover:bg-rose-950/40"
+              >
+                <Trash2 size={14} />
+                <span>Delete</span>
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {isBulkShareOpen && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-950/40 backdrop-blur-sm transition-opacity">
+          <div className="w-full max-w-md rounded-2xl border border-white/20 bg-white/95 dark:bg-slate-900/95 shadow-2xl backdrop-blur-2xl p-6 animate-scale-in">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">Bulk Share Leads</h3>
+              <button onClick={() => { setIsBulkShareOpen(false); setBulkShareLinks([]); }} className="p-1 text-slate-400 hover:text-slate-600">
+                <X size={18} />
+              </button>
+            </div>
+            <p className="text-sm text-slate-500 mb-5">Generate secure share links for all <strong>{selectedLeadIds.length} selected leads</strong>.</p>
+            
+            {bulkShareLinks.length > 0 ? (
+              <div className="space-y-4">
+                <div className="rounded-xl bg-emerald-500/10 p-4 border border-emerald-500/20 text-center">
+                  <CheckCircle2 size={24} className="text-emerald-500 mx-auto mb-2" />
+                  <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">Share links generated successfully!</p>
+                </div>
+                <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
+                  {bulkShareLinks.map((link, idx) => (
+                    <div key={idx} className="flex gap-2 items-center rounded-xl bg-white/50 border border-slate-200 dark:bg-black/30 dark:border-white/10 p-2 text-xs">
+                      <span className="font-bold text-slate-700 dark:text-slate-300 truncate max-w-[120px]">{link.company}:</span>
+                      <input readOnly value={link.url} className="flex-1 bg-transparent truncate outline-none text-slate-500" />
+                      <button onClick={() => navigator.clipboard.writeText(link.url)} className="rounded bg-brand-500 px-2 py-1 text-[10px] font-bold text-white hover:bg-brand-400">Copy</button>
+                    </div>
+                  ))}
+                </div>
+                <button type="button" onClick={() => { setIsBulkShareOpen(false); setBulkShareLinks([]); }} className="w-full h-11 rounded-xl bg-brand-600 text-sm font-bold text-white hover:bg-brand-500">Close</button>
+              </div>
+            ) : (
+              <form onSubmit={handleBulkShareSubmit} className="space-y-4">
+                {bulkShareError && <div className="text-xs text-rose-500 bg-rose-500/10 p-3 rounded-xl border border-rose-500/20">{bulkShareError}</div>}
+                
+                <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl">
+                  <button type="button" onClick={() => setBulkShareMode("restricted")} className={`rounded-lg py-2 text-xs font-bold transition ${bulkShareMode === "restricted" ? "bg-white dark:bg-slate-700 shadow text-slate-800 dark:text-white" : "text-slate-500 hover:text-slate-700"}`}>Specific Emails</button>
+                  <button type="button" onClick={() => setBulkShareMode("public")} className={`rounded-lg py-2 text-xs font-bold transition ${bulkShareMode === "public" ? "bg-white dark:bg-slate-700 shadow text-slate-800 dark:text-white" : "text-slate-500 hover:text-slate-700"}`}>Anyone with link</button>
+                </div>
+
+                {bulkShareMode === "restricted" && (
+                  <label className="block">
+                    <span className="mb-1 text-[11px] font-bold uppercase text-slate-500">Allowed Emails (comma separated)</span>
+                    <input 
+                      value={bulkShareEmails} 
+                      onChange={e => setBulkShareEmails(e.target.value)} 
+                      placeholder="partner@example.com, client@example.com"
+                      className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+                    />
+                  </label>
+                )}
+
+                <div className="pt-2">
+                  <button type="submit" disabled={bulkSharing} className="w-full flex items-center justify-center gap-2 rounded-xl bg-brand-600 py-2.5 text-sm font-bold text-white shadow-glow transition hover:bg-brand-500 disabled:opacity-60">
+                    {bulkSharing ? <Loader2 size={16} className="animate-spin" /> : <Globe size={16} />}
+                    Generate {selectedLeadIds.length} Links
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
 {budgetModalLeadId && (() => {
         const lead = leads.find(l => l.id === budgetModalLeadId);
         return (

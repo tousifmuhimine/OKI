@@ -58,7 +58,7 @@ async def upsert_lead_from_inbound_message(
         contact_person=contact.name or None,
         source=channel_type,
         status="new",
-        assigned_user_id=inbox.workspace_id,
+        assigned_user_id=None,
         contact_id=contact.id,
         inbox_id=inbox.id,
         conversation_id=conversation.id,

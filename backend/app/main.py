@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api.router import api_router
 from app.core.config import settings
@@ -18,6 +20,10 @@ app = FastAPI(
     title=settings.app_name,
     lifespan=lifespan,
 )
+
+# Ensure storage directory exists
+os.makedirs("storage/documents", exist_ok=True)
+app.mount("/storage", StaticFiles(directory="storage"), name="storage")
 
 app.add_middleware(
     CORSMiddleware,

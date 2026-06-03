@@ -28,6 +28,12 @@ function isStage(item: ConfigItem): item is LeadStageConfig {
 }
 
 export default function CRMConfigPage() {
+  const [orgName, setOrgName] = useState("");
+  const [orgType, setOrgType] = useState("");
+  const [orgTypes, setOrgTypes] = useState<{ id: string; name: string; code: string }[]>([]);
+  const [orgSaving, setOrgSaving] = useState(false);
+  const [orgSuccess, setOrgSuccess] = useState(false);
+
   const [activeTab, setActiveTab] = useState<TabKey>("sources");
   const [data, setData] = useState<Record<TabKey, ConfigItem[]>>({
     sources: [],
@@ -66,8 +72,45 @@ export default function CRMConfigPage() {
     }
   }
 
+  async function loadOrgDetails() {
+    try {
+      const [orgRes, typesRes] = await Promise.all([
+        apiRequest<{ id: string; company_name: string; organization_type_code: string | null }>("/organizations/me"),
+        apiRequest<{ id: string; name: string; code: string }[]>("/organizations/types"),
+      ]);
+      setOrgName(orgRes.company_name);
+      setOrgType(orgRes.organization_type_code || "");
+      setOrgTypes(typesRes);
+    } catch (err) {
+      // Ignore
+    }
+  }
+
+  async function saveOrgDetails(e: React.FormEvent) {
+    e.preventDefault();
+    setOrgSaving(true);
+    setOrgSuccess(false);
+    try {
+      await apiRequest("/organizations/me", {
+        method: "PATCH",
+        body: JSON.stringify({
+          company_name: orgName,
+          organization_type_code: orgType,
+        }),
+      });
+      setOrgSuccess(true);
+      setTimeout(() => setOrgSuccess(false), 3000);
+      await loadConfig();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setOrgSaving(false);
+    }
+  }
+
   useEffect(() => {
     void loadConfig();
+    void loadOrgDetails();
   }, []);
 
   function openCreate() {
@@ -197,6 +240,58 @@ export default function CRMConfigPage() {
             {error}
           </p>
         ) : null}
+
+        {/* Organization Settings Card */}
+        <div className="glass-card p-6 mb-6 text-left">
+          <div className="mb-4">
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <Settings2 size={18} className="text-brand-500" />
+              <span>Organization & Industry Settings</span>
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Select your industry type to seed default pipeline stages, departments, and custom context fields.
+            </p>
+          </div>
+
+          <form onSubmit={saveOrgDetails} className="grid gap-4 sm:grid-cols-3 items-end">
+            <label className="block text-left">
+              <span className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">Company Name</span>
+              <input
+                required
+                value={orgName}
+                onChange={(e) => setOrgName(e.target.value)}
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white/80 px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+              />
+            </label>
+
+            <label className="block text-left">
+              <span className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">Industry / CRM Module Type</span>
+              <select
+                value={orgType}
+                onChange={(e) => setOrgType(e.target.value)}
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white text-slate-800 dark:text-slate-100"
+              >
+                <option value="">-- Choose Module Type --</option>
+                {orgTypes.map((t) => (
+                  <option key={t.code} value={t.code}>{t.name}</option>
+                ))}
+              </select>
+            </label>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="submit"
+                disabled={orgSaving}
+                className="h-10 flex-1 flex items-center justify-center gap-2 rounded-xl bg-brand-600 text-xs font-bold text-white shadow-glow transition hover:bg-brand-500 disabled:opacity-60 cursor-pointer animate-fade-in"
+              >
+                {orgSaving ? <Loader2 size={14} className="animate-spin" /> : "Save Changes"}
+              </button>
+              {orgSuccess && (
+                <span className="text-xs text-emerald-500 font-bold animate-pulse shrink-0">✓ Saved</span>
+              )}
+            </div>
+          </form>
+        </div>
 
         <div className="grid gap-5 lg:grid-cols-[240px_1fr]">
           <div className="flex flex-col gap-1">

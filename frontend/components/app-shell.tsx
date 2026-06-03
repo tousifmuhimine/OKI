@@ -118,9 +118,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     permissions: [],
   });
 
+  const [orgName, setOrgName] = useState("");
+  const [orgTypeName, setOrgTypeName] = useState("");
+
   const hasPermission = (permissionKey: string) => {
     const permissions = Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
-    return currentUser.role === "admin" || permissions.includes(permissionKey);
+    return currentUser.role === "admin" || currentUser.role === "super_admin" || permissions.includes(permissionKey);
   };
 
   const canAccessPath = (path: string | null) => {
@@ -144,28 +147,48 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           initials: "DU",
           permissions: ["customers.manage", "leads.manage", "tasks.manage", "analytics.view", "chat.manage", "ai.settings", "permissions.manage"],
         });
+        setOrgName("Demo Workspace");
+        setOrgTypeName("Study Abroad");
         return;
       }
       if (isSupabaseConfigured()) {
         const { data } = await getSupabaseClient().auth.getSession();
         const user = data.session?.user;
-        const meta = user?.user_metadata;
-        if (meta) {
-          const name = meta.name || user?.email?.split("@")[0] || "User";
-          const role = meta.role || "agent";
-          const initials = name.slice(0, 2).toUpperCase();
+        if (user) {
+          let name = user.user_metadata?.name || user.email?.split("@")[0] || "User";
+          let role = "agent";
           let permissions: string[] = [];
-          if (user?.id) {
-            try {
-              const response = await apiRequest<PermissionGrantListResponse>("/permissions/me");
-              permissions = response.data;
-            } catch {
-              permissions = [];
-            }
+
+          // Fetch database user details to get actual role
+          try {
+            const dbUser = await apiRequest<{ name: string | null; role_code: string | null }>("/organizations/users/me");
+            if (dbUser.name) name = dbUser.name;
+            if (dbUser.role_code) role = dbUser.role_code;
+          } catch {
+            if (user.user_metadata?.role) role = user.user_metadata.role;
           }
-          setCurrentUser({ id: user?.id ?? null, name, role, initials, permissions });
+
+          // Fetch permissions
+          try {
+            const response = await apiRequest<PermissionGrantListResponse>("/permissions/me");
+            permissions = response.data;
+          } catch {
+            permissions = [];
+          }
+
+          // Fetch organization details
+          try {
+            const orgRes = await apiRequest<{ company_name: string; organization_type_name: string | null }>("/organizations/me");
+            setOrgName(orgRes.company_name);
+            setOrgTypeName(orgRes.organization_type_name || "");
+          } catch {
+            // ignore
+          }
+
+          const initials = name.slice(0, 2).toUpperCase();
+          setCurrentUser({ id: user.id, name, role, initials, permissions });
         } else {
-          setCurrentUser({ id: user?.id ?? null, name: "User", role: "agent", initials: "US", permissions: [] });
+          setCurrentUser({ id: null, name: "User", role: "agent", initials: "US", permissions: [] });
         }
       }
     }
@@ -359,6 +382,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               ⌘K
             </kbd>
           </div>
+
+          {orgName && (
+            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/40 dark:bg-white/5 border border-slate-200/50 dark:border-white/5 animate-fade-in ml-3">
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{orgName}</span>
+              {orgTypeName && (
+                <span className="text-[10px] font-extrabold uppercase tracking-widest px-2 py-0.5 rounded-lg bg-brand-500/10 text-brand-600 dark:text-brand-400 border border-brand-500/10">
+                  {orgTypeName}
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Right */}
@@ -401,9 +435,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </div>
               <div className="hidden xl:flex flex-col items-start justify-center text-left">
                 <span className="text-xs font-medium text-slate-800 dark:text-slate-200 capitalize leading-none">{currentUser.name}</span>
-                {hasPermission("permissions.manage") && (
-                  <span className="text-[9px] font-bold uppercase tracking-wider text-brand-500 dark:text-brand-400 mt-0.5">Admin Access</span>
-                )}
+                <span className="text-[9px] font-bold uppercase tracking-wider text-brand-500 dark:text-brand-400 mt-1 capitalize">
+                  {currentUser.role.replace("_", " ")}
+                </span>
               </div>
               <ChevronDown size={11} className={`hidden text-slate-500 transition-transform dark:text-slate-400 xl:block ${accountMenuOpen ? "rotate-180" : ""}`} />
             </button>

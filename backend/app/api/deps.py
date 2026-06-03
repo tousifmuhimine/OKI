@@ -19,11 +19,50 @@ class AuthContext:
     org_id: str | None = None
     email: str | None = None
     role: str | None = None
+    branch_id: str | None = None
+
+
+async def _ensure_organization_initialized(session: AsyncSession, org_id: str) -> None:
+    from app.db.models import Organization, OrganizationType
+    from sqlalchemy import select
+    from app.services.industry_seeder import seed_organization_defaults, seed_organization_types
+    from app.api.routes.organizations import _backfill_org_data
+
+    org = await session.get(Organization, org_id)
+    await seed_organization_types(session)
+
+    if not org:
+        is_dev = (org_id == "dev-org")
+        org_type_id = None
+        default_type = None
+        if is_dev:
+            default_type = (await session.execute(select(OrganizationType).where(OrganizationType.code == "study_abroad"))).scalar_one_or_none()
+            org_type_id = default_type.id if default_type else None
+
+        org = Organization(
+            id=org_id,
+            company_name="My Organization" if org_id != "dev-org" else "Dev Org",
+            organization_type_id=org_type_id
+        )
+        session.add(org)
+        await session.flush()
+        if is_dev and default_type:
+            await seed_organization_defaults(session, org.id, default_type.code)
+        await _backfill_org_data(session, org.id)
+        await session.commit()
+    elif not org.organization_type_id and org_id == "dev-org":
+        default_type = (await session.execute(select(OrganizationType).where(OrganizationType.code == "study_abroad"))).scalar_one_or_none()
+        if default_type:
+            org.organization_type_id = default_type.id
+            await seed_organization_defaults(session, org.id, default_type.code)
+            await _backfill_org_data(session, org.id)
+            await session.commit()
 
 
 async def get_current_auth(
     token: str | None = Depends(oauth2_scheme),
     dev_workspace_id: str | None = Header(default=None, alias="X-Dev-Workspace-Id"),
+    session: AsyncSession = Depends(get_db_session),
 ) -> AuthContext:
     if token:
         try:
@@ -45,18 +84,107 @@ async def get_current_auth(
         if not org_id and settings.allow_anon_dev and settings.debug:
             org_id = "dev-org"
 
+        # Query local database user details
+        from app.db.models import User, Role
+        from sqlalchemy import select
+        local_user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+
+        role = None
+        branch_id = None
+        local_org_id = None
+        if local_user:
+            role = (await session.execute(select(Role.code).where(Role.id == local_user.role_id))).scalar_one_or_none()
+            branch_id = local_user.branch_id
+            local_org_id = local_user.organization_id
+        else:
+            role_code = payload.get("role") or payload.get("custom_role") or "super_admin"
+            
+            role_codes = ["super_admin", "admin", "branch_admin", "individual_agent", "employee"]
+            for rc in role_codes:
+                exists = (await session.execute(select(Role).where(Role.code == rc))).scalar_one_or_none()
+                if not exists:
+                    session.add(Role(name=rc.replace("_", " ").title(), code=rc))
+            await session.flush()
+            
+            role_obj = (await session.execute(select(Role).where(Role.code == role_code))).scalar_one_or_none()
+            if not role_obj:
+                role_obj = Role(name=role_code.replace("_", " ").title(), code=role_code)
+                session.add(role_obj)
+                await session.flush()
+            
+            resolved_org_id = org_id or payload.get("org_id")
+            if not resolved_org_id:
+                import uuid
+                resolved_org_id = str(uuid.uuid4())
+                
+            local_user = User(
+                id=user_id,
+                organization_id=resolved_org_id,
+                email=payload.get("email") or "user@domain.com",
+                role_id=role_obj.id,
+                name=payload.get("user_metadata", {}).get("name") or payload.get("name")
+            )
+            session.add(local_user)
+            await session.commit()
+            
+            role = role_code
+            branch_id = None
+            local_org_id = resolved_org_id
+
+        resolved_org_id = local_org_id or org_id
+        if resolved_org_id:
+            await _ensure_organization_initialized(session, resolved_org_id)
+
         return AuthContext(
             user_id=user_id,
-            org_id=org_id,
+            org_id=resolved_org_id,
             email=payload.get("email"),
-            role=payload.get("role"),
+            role=role,
+            branch_id=branch_id,
         )
 
     if settings.allow_anon_dev and settings.debug:
+        user_id = dev_workspace_id or "dev-user"
+        from app.db.models import User, Role, Organization
+        from sqlalchemy import select
+        
+        # Ensure a dev organization exists
+        org_id = dev_workspace_id or "dev-org"
+        await _ensure_organization_initialized(session, org_id)
+        
+        # Ensure Roles exist
+        role_codes = ["super_admin", "branch_admin", "individual_agent", "employee"]
+        for rc in role_codes:
+            exists = (await session.execute(select(Role).where(Role.code == rc))).scalar_one_or_none()
+            if not exists:
+                session.add(Role(name=rc.replace("_", " ").title(), code=rc))
+        await session.flush()
+
+        local_user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if not local_user:
+            sa_role = (await session.execute(select(Role).where(Role.code == "super_admin"))).scalar_one()
+            local_user = User(
+                id=user_id,
+                organization_id=org.id,
+                email="dev@local",
+                role_id=sa_role.id
+            )
+            session.add(local_user)
+            await session.commit()
+            role_code = "super_admin"
+            branch_id = None
+            local_org_id = org.id
+        else:
+            role_code = (await session.execute(select(Role.code).where(Role.id == local_user.role_id))).scalar_one_or_none() or "super_admin"
+            branch_id = local_user.branch_id
+            local_org_id = local_user.organization_id
+
         return AuthContext(
-            user_id=dev_workspace_id or "dev-user",
-            org_id=dev_workspace_id or "dev-org",
-            email="dev@local"
+            user_id=user_id,
+            org_id=local_org_id,
+            email="dev@local",
+            role=role_code,
+            branch_id=branch_id,
         )
 
     if not token:
@@ -71,7 +199,7 @@ def get_session_dep(session: AsyncSession = Depends(get_db_session)) -> AsyncSes
 
 
 async def has_permission(session: AsyncSession, workspace_id: str, auth: AuthContext, permission_key: str) -> bool:
-    if auth.role == "admin":
+    if auth.role == "super_admin" or auth.role == "admin":
         return True
 
     from sqlalchemy import select
@@ -92,3 +220,55 @@ async def require_permission(permission_key: str, auth: AuthContext, session: As
     allowed = await has_permission(session, auth.user_id, auth, permission_key)
     if not allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied")
+
+
+def apply_tenant_filters(query, auth: AuthContext, model_class):
+    """
+    Applies strict tenant and role-based filtering to an SQLAlchemy query.
+    """
+    from sqlalchemy import or_, select
+    has_org_id = hasattr(model_class, "organization_id")
+    has_branch_id = hasattr(model_class, "branch_id")
+    has_assigned_user = hasattr(model_class, "assigned_user_id")
+
+    conditions = []
+    
+    if has_org_id and auth.org_id:
+        conditions.append(model_class.organization_id == auth.org_id)
+        
+    if auth.role == "super_admin" or auth.role == "admin":
+        # Can see everything in the organization
+        pass
+    elif auth.role == "branch_admin":
+        if has_branch_id and auth.branch_id:
+            conditions.append(model_class.branch_id == auth.branch_id)
+    elif auth.role == "individual_agent":
+        if has_assigned_user:
+            from app.db.models import User
+            sub_users = select(User.id).where(User.reports_to_id == auth.user_id)
+            agent_conds = [
+                model_class.assigned_user_id == auth.user_id,
+                model_class.assigned_user_id.in_(sub_users)
+            ]
+            if hasattr(model_class, "assigned_agent_id"):
+                agent_conds.append(model_class.assigned_agent_id == auth.user_id)
+                agent_conds.append(model_class.assigned_agent_id.in_(sub_users))
+            conditions.append(or_(*agent_conds))
+    elif auth.role == "employee":
+        if has_assigned_user:
+            from app.db.models import Assignment
+            employee_conds = [model_class.assigned_user_id == auth.user_id]
+            if hasattr(model_class, "assigned_agent_id"):
+                employee_conds.append(model_class.assigned_agent_id == auth.user_id)
+            
+            lead_sub = select(Assignment.lead_id).where(Assignment.user_id == auth.user_id, Assignment.lead_id.is_not(None))
+            cust_sub = select(Assignment.customer_id).where(Assignment.user_id == auth.user_id, Assignment.customer_id.is_not(None))
+            
+            employee_conds.append(model_class.id.in_(lead_sub))
+            employee_conds.append(model_class.id.in_(cust_sub))
+            conditions.append(or_(*employee_conds))
+
+    if conditions:
+        query = query.where(*conditions)
+        
+    return query

@@ -41,6 +41,9 @@ class LeadBase(BaseModel):
     untouched: bool = True
     ai_instructions: str | None = None
     tags: list[str] | None = None
+    branch_id: str | None = None
+    last_education: str | None = None
+    assigned_user_ids: list[str] | None = None
 
     @field_validator("tags", mode="before")
     @classmethod
@@ -95,6 +98,9 @@ class LeadUpdate(BaseModel):
     untouched: bool | None = None
     ai_instructions: str | None = None
     tags: list[str] | None = None
+    branch_id: str | None = None
+    last_education: str | None = None
+    assigned_user_ids: list[str] | None = None
 
 
 class LeadOut(LeadBase):

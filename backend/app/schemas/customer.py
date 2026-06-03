@@ -40,6 +40,8 @@ class CustomerBase(BaseModel):
     notes: str | None = None
     # Company type: ecommerce, real_estate, study_abroad
     type: str | None = None
+    branch_id: str | None = None
+    assigned_user_ids: list[str] | None = None
 
 
 class CustomerCreate(CustomerBase):
@@ -61,6 +63,8 @@ class CustomerUpdate(BaseModel):
     notes: str | None = None
     last_contact_date: datetime | None = None
     type: str | None = None
+    branch_id: str | None = None
+    assigned_user_ids: list[str] | None = None
 
 
 class CustomerOut(CustomerBase):

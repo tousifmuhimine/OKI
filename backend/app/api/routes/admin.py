@@ -88,11 +88,37 @@ async def create_admin_user(
         raise HTTPException(status_code=response.status_code, detail=response.text)
 
     data = response.json()
+    user_data = data.get("user") or data
+    new_user_id = str(user_data.get("id"))
+    
+    # Create local DB user immediately
+    from app.db.models import User, Role
+    
+    role_to_use = payload.role or "employee"
+    role_stmt = select(Role).where(Role.code == role_to_use)
+    role_res = await session.execute(role_stmt)
+    role_obj = role_res.scalar_one_or_none()
+    if not role_obj:
+        role_obj = Role(name=role_to_use.replace("_", " ").title(), code=role_to_use)
+        session.add(role_obj)
+        await session.flush()
+        
+    local_user = User(
+        id=new_user_id,
+        organization_id=auth.org_id,
+        email=payload.email,
+        role_id=role_obj.id,
+        name=payload.full_name,
+    )
+    session.add(local_user)
+    await session.commit()
+
     return AdminUserOut(
-        id=str(data.get("id") or data.get("user", {}).get("id")),
-        email=data.get("email") or data.get("user", {}).get("email"),
+        id=new_user_id,
+        email=payload.email,
         role=payload.role,
     )
+
 
 
 @router.get("/users", response_model=AdminUserListResponse)

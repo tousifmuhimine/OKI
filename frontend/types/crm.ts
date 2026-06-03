@@ -138,6 +138,8 @@ export type Lead = {
   untouched?: boolean;
   ai_instructions?: string | null;
   tags?: string[] | null;
+  last_education?: string | null;
+  assigned_user_ids?: string[] | null;
 };
 
 export type LeadListResponse = {

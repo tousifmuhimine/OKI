@@ -29,6 +29,8 @@ class Customer(Base, TimestampMixin):
     __tablename__ = "customers"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    branch_id: Mapped[str] = mapped_column(String(36), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     company_name: Mapped[str] = mapped_column(String(255), index=True)
     contact_person: Mapped[str] = mapped_column(String(255), nullable=True)
     email: Mapped[str] = mapped_column(String(255), nullable=True, index=True)
@@ -39,6 +41,8 @@ class Customer(Base, TimestampMixin):
     stage: Mapped[str] = mapped_column(String(64), default="new", index=True)
     group_name: Mapped[str] = mapped_column(String(120), nullable=True)
     tags: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=True)
+    notes: Mapped[str] = mapped_column(Text, nullable=True)
 
 
 class LeadShareLink(Base, TimestampMixin):
@@ -62,11 +66,15 @@ class Lead(Base, TimestampMixin):
     __tablename__ = "leads"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    branch_id: Mapped[str] = mapped_column(String(36), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
+    department_id: Mapped[str] = mapped_column(String(36), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True, index=True)
     company_name: Mapped[str] = mapped_column(String(255), index=True)
     contact_person: Mapped[str] = mapped_column(String(255), nullable=True)
     source: Mapped[str] = mapped_column(String(120), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(64), default="new", index=True)
     assigned_user_id: Mapped[str] = mapped_column(String(36), nullable=True)
+    last_education: Mapped[str] = mapped_column(String(255), nullable=True)
     notes: Mapped[str] = mapped_column(Text, nullable=True)
     email: Mapped[str] = mapped_column(String(255), nullable=True, index=True)
     phone: Mapped[str] = mapped_column(String(64), nullable=True, index=True)
@@ -135,7 +143,8 @@ class LeadStage(Base, TimestampMixin):
     __tablename__ = "lead_stages"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
-    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True, index=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     probability_percent: Mapped[int] = mapped_column(Integer, default=0)
     position: Mapped[int] = mapped_column(Integer, default=0, index=True)
     is_closed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
@@ -170,6 +179,8 @@ class LeadActivity(Base, TimestampMixin):
     __tablename__ = "lead_activities"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    branch_id: Mapped[str] = mapped_column(String(36), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     lead_id: Mapped[str] = mapped_column(String(36), ForeignKey("leads.id", ondelete="CASCADE"), index=True)
     activity_type: Mapped[str] = mapped_column(String(64), index=True)
     direction: Mapped[str] = mapped_column(String(32), nullable=True, index=True)
@@ -187,6 +198,8 @@ class Opportunity(Base, TimestampMixin):
     __tablename__ = "opportunities"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    branch_id: Mapped[str] = mapped_column(String(36), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     customer_id: Mapped[str] = mapped_column(String(36), ForeignKey("customers.id"), index=True)
     title: Mapped[str] = mapped_column(String(255))
     stage: Mapped[str] = mapped_column(String(64), default="clue", index=True)
@@ -210,6 +223,8 @@ class SalesOrder(Base, TimestampMixin):
     __tablename__ = "orders"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    branch_id: Mapped[str] = mapped_column(String(36), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     customer_id: Mapped[str] = mapped_column(String(36), ForeignKey("customers.id"), index=True)
     handler_user_id: Mapped[str] = mapped_column(String(36), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="draft", index=True)
@@ -253,6 +268,8 @@ class Inbox(Base):
     __tablename__ = "inboxes"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    branch_id: Mapped[str] = mapped_column(String(36), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     workspace_id: Mapped[str] = mapped_column(String(36), index=True)
     name: Mapped[str] = mapped_column(String(255))
     channel_type: Mapped[str] = mapped_column(channel_type_enum, index=True)
@@ -267,6 +284,8 @@ class Contact(Base):
     __tablename__ = "contacts"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    branch_id: Mapped[str] = mapped_column(String(36), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     workspace_id: Mapped[str] = mapped_column(String(36), index=True)
     name: Mapped[str] = mapped_column(String(255))
     email: Mapped[str] = mapped_column(String(255), nullable=True, index=True)
@@ -283,6 +302,8 @@ class Conversation(Base):
     __tablename__ = "conversations"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    branch_id: Mapped[str] = mapped_column(String(36), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     workspace_id: Mapped[str] = mapped_column(String(36), index=True)
     inbox_id: Mapped[str] = mapped_column(String(36), ForeignKey("inboxes.id", ondelete="CASCADE"), index=True)
     contact_id: Mapped[str] = mapped_column(String(36), ForeignKey("contacts.id", ondelete="CASCADE"), index=True)
@@ -302,6 +323,8 @@ class Message(Base):
     __tablename__ = "messages"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    branch_id: Mapped[str] = mapped_column(String(36), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     conversation_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("conversations.id", ondelete="CASCADE"),
@@ -418,6 +441,8 @@ class Task(Base, TimestampMixin):
     __tablename__ = "tasks"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    branch_id: Mapped[str] = mapped_column(String(36), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     entity_type: Mapped[str] = mapped_column(String(64), index=True)  # 'lead', 'opportunity', 'customer'
     entity_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
     assigned_user_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
@@ -457,3 +482,116 @@ class Organization(Base, TimestampMixin):
     company_name: Mapped[str] = mapped_column(String(255), index=True)
     allow_public_shares: Mapped[bool] = mapped_column(Boolean, default=True)
     default_share_expiry_days: Mapped[int] = mapped_column(Integer, nullable=True)
+    organization_type_id: Mapped[str] = mapped_column(String(36), ForeignKey("organization_types.id", ondelete="SET NULL"), nullable=True, index=True)
+
+
+class OrganizationType(Base, TimestampMixin):
+    __tablename__ = "organization_types"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+
+
+class Branch(Base, TimestampMixin):
+    __tablename__ = "branches"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(255), index=True)
+    location: Mapped[str] = mapped_column(String(255), nullable=True)
+
+
+class Role(Base, TimestampMixin):
+    __tablename__ = "roles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+
+
+class User(Base, TimestampMixin):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)  # matching Supabase user auth id
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
+    branch_id: Mapped[str] = mapped_column(String(36), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=True)
+    role_id: Mapped[str] = mapped_column(String(36), ForeignKey("roles.id", ondelete="RESTRICT"), index=True)
+    reports_to_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+
+class Permission(Base, TimestampMixin):
+    __tablename__ = "permissions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    code: Mapped[str] = mapped_column(String(120), nullable=False, unique=True, index=True)
+
+
+class Pipeline(Base, TimestampMixin):
+    __tablename__ = "pipelines"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+
+class PipelineStage(Base, TimestampMixin):
+    __tablename__ = "pipeline_stages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    pipeline_id: Mapped[str] = mapped_column(String(36), ForeignKey("pipelines.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    is_closed: Mapped[bool] = mapped_column(Boolean, default=False)
+    probability_percent: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class Department(Base, TimestampMixin):
+    __tablename__ = "departments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class Assignment(Base, TimestampMixin):
+    __tablename__ = "assignments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    lead_id: Mapped[str] = mapped_column(String(36), ForeignKey("leads.id", ondelete="CASCADE"), nullable=True, index=True)
+    customer_id: Mapped[str] = mapped_column(String(36), ForeignKey("customers.id", ondelete="CASCADE"), nullable=True, index=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    assigned_by_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+
+class CommunicationLog(Base, TimestampMixin):
+    __tablename__ = "communication_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    lead_id: Mapped[str] = mapped_column(String(36), ForeignKey("leads.id", ondelete="CASCADE"), nullable=True, index=True)
+    customer_id: Mapped[str] = mapped_column(String(36), ForeignKey("customers.id", ondelete="CASCADE"), nullable=True, index=True)
+    type: Mapped[str] = mapped_column(String(64), index=True)  # 'whatsapp', 'email', 'phone'
+    direction: Mapped[str] = mapped_column(String(32), index=True)  # 'incoming', 'outgoing'
+    content: Mapped[str] = mapped_column(Text, nullable=True)
+    logged_by_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    status: Mapped[str] = mapped_column(String(64), nullable=True)
+
+
+class Document(Base, TimestampMixin):
+    __tablename__ = "documents"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    lead_id: Mapped[str] = mapped_column(String(36), ForeignKey("leads.id", ondelete="CASCADE"), nullable=True, index=True)
+    customer_id: Mapped[str] = mapped_column(String(36), ForeignKey("customers.id", ondelete="CASCADE"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    file_type: Mapped[str] = mapped_column(String(64), index=True)  # 'passport', 'nid', 'ielts', 'medical', 'certificates', 'other'
+    file_url: Mapped[str] = mapped_column(Text)
+    uploaded_by_id: Mapped[str] = mapped_column(String(36), nullable=True)

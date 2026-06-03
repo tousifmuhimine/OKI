@@ -17,6 +17,12 @@ async def _can_view_customers(auth: AuthContext, session: AsyncSession) -> bool:
     return auth.role == "admin" or await has_permission(session, auth.user_id, auth, "customers.view") or await has_permission(session, auth.user_id, auth, "customers.manage")
 
 
+async def _populate_customer_assignments(customer_obj: Customer, session: AsyncSession) -> list[str]:
+    from app.db.models import Assignment
+    res = await session.execute(select(Assignment.user_id).where(Assignment.customer_id == customer_obj.id))
+    return list(res.scalars().all())
+
+
 @router.get("", response_model=CustomerListResponse)
 async def list_customers(
     stage: str | None = None,
@@ -33,9 +39,9 @@ async def list_customers(
     query = select(Customer)
     count_query = select(func.count(Customer.id))
 
-    if auth.role != "admin":
-        query = query.where(Customer.assigned_user_id == auth.user_id)
-        count_query = count_query.where(Customer.assigned_user_id == auth.user_id)
+    from app.api.deps import apply_tenant_filters
+    query = apply_tenant_filters(query, auth, Customer)
+    count_query = apply_tenant_filters(count_query, auth, Customer)
 
     if stage:
         query = query.where(Customer.stage == stage)
@@ -57,8 +63,14 @@ async def list_customers(
     rows = (await session.execute(query)).scalars().all()
     total = (await session.execute(count_query)).scalar_one()
 
+    data_out = []
+    for r in rows:
+        c_out = CustomerOut.model_validate(r)
+        c_out.assigned_user_ids = await _populate_customer_assignments(r, session)
+        data_out.append(c_out)
+
     return CustomerListResponse(
-        data=[CustomerOut.model_validate(row) for row in rows],
+        data=data_out,
         meta=PaginationMeta(total=total, limit=limit, offset=offset),
     )
 
@@ -71,14 +83,31 @@ async def create_customer(
 ) -> CustomerOut:
     if not await has_permission(session, auth.user_id, auth, "customers.manage"):
         raise HTTPException(status_code=403, detail="Permission denied")
-    entity = Customer(**payload.model_dump())
-    if not entity.assigned_user_id:
-        entity.assigned_user_id = auth.user_id
+    data = payload.model_dump()
+    data["organization_id"] = auth.org_id
+    data["branch_id"] = auth.branch_id
+    assigned_user_ids = data.pop("assigned_user_ids", None)
+    
+    entity = Customer(**data)
 
     session.add(entity)
+    await session.flush()
+
+    if assigned_user_ids:
+        from app.db.models import Assignment
+        for uid in assigned_user_ids:
+            session.add(Assignment(
+                organization_id=auth.org_id,
+                customer_id=entity.id,
+                user_id=uid,
+                assigned_by_id=auth.user_id
+            ))
+            
     await session.commit()
     await session.refresh(entity)
-    return CustomerOut.model_validate(entity)
+    c_out = CustomerOut.model_validate(entity)
+    c_out.assigned_user_ids = await _populate_customer_assignments(entity, session)
+    return c_out
 
 
 @router.get("/{customer_id}", response_model=CustomerOut)
@@ -90,9 +119,18 @@ async def get_customer(
     entity = await session.get(Customer, customer_id)
     if not entity:
         raise HTTPException(status_code=404, detail="Customer not found")
-    if auth.role != "admin" and entity.assigned_user_id != auth.user_id:
+    if entity.organization_id and entity.organization_id != auth.org_id:
         raise HTTPException(status_code=404, detail="Customer not found")
-    return CustomerOut.model_validate(entity)
+    
+    # Check hierarchy and assigned permission
+    from app.api.deps import apply_tenant_filters
+    stmt = apply_tenant_filters(select(Customer).where(Customer.id == customer_id), auth, Customer)
+    res = await session.execute(stmt)
+    if not res.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Customer not found")
+    c_out = CustomerOut.model_validate(entity)
+    c_out.assigned_user_ids = await _populate_customer_assignments(entity, session)
+    return c_out
 
 
 @router.get("/{customer_id}/profile", response_model=CustomerProfileResponse)
@@ -104,7 +142,13 @@ async def get_customer_profile(
     entity = await session.get(Customer, customer_id)
     if not entity:
         raise HTTPException(status_code=404, detail="Customer not found")
-    if auth.role != "admin" and entity.assigned_user_id != auth.user_id:
+    if entity.organization_id and entity.organization_id != auth.org_id:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    
+    from app.api.deps import apply_tenant_filters
+    stmt = apply_tenant_filters(select(Customer).where(Customer.id == customer_id), auth, Customer)
+    res = await session.execute(stmt)
+    if not res.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Customer not found")
 
     leads = (
@@ -150,8 +194,11 @@ async def get_customer_profile(
 
     latest_lead = leads[0] if leads else None
 
+    c_out = CustomerOut.model_validate(entity)
+    c_out.assigned_user_ids = await _populate_customer_assignments(entity, session)
+
     return CustomerProfileResponse(
-        customer=CustomerOut.model_validate(entity),
+        customer=c_out,
         related_leads=[LeadOut.model_validate(lead) for lead in leads],
         lead_intelligence=lead_intelligence,
         preference_history=[
@@ -183,13 +230,37 @@ async def update_customer(
     entity = await session.get(Customer, customer_id)
     if not entity:
         raise HTTPException(status_code=404, detail="Customer not found")
+    if entity.organization_id and entity.organization_id != auth.org_id:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    from app.api.deps import apply_tenant_filters
+    stmt = apply_tenant_filters(select(Customer).where(Customer.id == customer_id), auth, Customer)
+    res = await session.execute(stmt)
+    if not res.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Customer not found")
 
-    for key, value in payload.model_dump(exclude_none=True).items():
+    changes = payload.model_dump(exclude_unset=True)
+    assigned_user_ids = changes.pop("assigned_user_ids", None)
+
+    for key, value in changes.items():
         setattr(entity, key, value)
+
+    if assigned_user_ids is not None:
+        from app.db.models import Assignment
+        from sqlalchemy import delete
+        await session.execute(delete(Assignment).where(Assignment.customer_id == entity.id))
+        for uid in assigned_user_ids:
+            session.add(Assignment(
+                organization_id=auth.org_id,
+                customer_id=entity.id,
+                user_id=uid,
+                assigned_by_id=auth.user_id
+            ))
 
     await session.commit()
     await session.refresh(entity)
-    return CustomerOut.model_validate(entity)
+    c_out = CustomerOut.model_validate(entity)
+    c_out.assigned_user_ids = await _populate_customer_assignments(entity, session)
+    return c_out
 
 
 @router.delete("/{customer_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -202,6 +273,13 @@ async def delete_customer(
         raise HTTPException(status_code=403, detail="Permission denied")
     entity = await session.get(Customer, customer_id)
     if not entity:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    if entity.organization_id and entity.organization_id != auth.org_id:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    from app.api.deps import apply_tenant_filters
+    stmt = apply_tenant_filters(select(Customer).where(Customer.id == customer_id), auth, Customer)
+    res = await session.execute(stmt)
+    if not res.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Customer not found")
 
     await session.delete(entity)

@@ -1,10 +1,11 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { clearAllAuthState, isDemoSessionActive } from "@/lib/demo-auth";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
+import { apiRequest } from "@/lib/api";
 
 type ProtectedPageProps = {
   children: React.ReactNode;
@@ -12,12 +13,16 @@ type ProtectedPageProps = {
 
 export function ProtectedPage({ children }: ProtectedPageProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
     let active = true;
 
     if (isDemoSessionActive()) {
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem("oki_org_type_code", "study_abroad");
+      }
       setReady(true);
       return () => {
         active = false;
@@ -35,7 +40,7 @@ export function ProtectedPage({ children }: ProtectedPageProps) {
 
     supabase.auth
       .getSession()
-      .then(({ data }) => {
+      .then(async ({ data }) => {
         if (!active) {
           return;
         }
@@ -45,7 +50,35 @@ export function ProtectedPage({ children }: ProtectedPageProps) {
           return;
         }
 
-        setReady(true);
+        // Verify organization onboarding
+        if (typeof window !== "undefined") {
+          const cachedType = sessionStorage.getItem("oki_org_type_code");
+          if (cachedType) {
+            if (cachedType === "null" && pathname !== "/auth/onboarding") {
+              router.replace("/auth/onboarding");
+              return;
+            }
+            setReady(true);
+            return;
+          }
+        }
+
+        // Not cached, fetch from backend
+        try {
+          const org = await apiRequest<{ organization_type_code: string | null }>("/organizations/me");
+          if (typeof window !== "undefined") {
+            sessionStorage.setItem("oki_org_type_code", org.organization_type_code || "null");
+            if (!org.organization_type_code && pathname !== "/auth/onboarding") {
+              router.replace("/auth/onboarding");
+              return;
+            }
+          }
+          setReady(true);
+        } catch (err) {
+          // If we fail to fetch org, redirect to login
+          clearAllAuthState();
+          router.replace("/auth/login");
+        }
       })
       .catch(() => {
         clearAllAuthState();
@@ -55,7 +88,7 @@ export function ProtectedPage({ children }: ProtectedPageProps) {
     return () => {
       active = false;
     };
-  }, [router]);
+  }, [router, pathname]);
 
   if (!ready) {
     return (

@@ -1,8 +1,11 @@
 from datetime import datetime, timedelta
 import secrets
+import csv
+import io
 
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File
+from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,11 +37,25 @@ from app.services.lead_capture import upsert_lead_from_inbound_message
 
 router = APIRouter()
 
-async def _get_lead_or_404(lead_id: str, session: AsyncSession) -> Lead:
+async def _get_lead_or_404(lead_id: str, session: AsyncSession, auth: AuthContext = None) -> Lead:
     lead = await session.get(Lead, lead_id)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+    if auth and lead.organization_id and lead.organization_id != auth.org_id:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if auth:
+        from app.api.deps import apply_tenant_filters
+        stmt = apply_tenant_filters(select(Lead).where(Lead.id == lead_id), auth, Lead)
+        res = await session.execute(stmt)
+        if not res.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Lead not found")
     return lead
+
+
+async def _populate_lead_assignments(lead_obj: Lead, session: AsyncSession) -> list[str]:
+    from app.db.models import Assignment
+    res = await session.execute(select(Assignment.user_id).where(Assignment.lead_id == lead_obj.id))
+    return list(res.scalars().all())
 
 
 async def _validate_config_ids(changes: dict, session: AsyncSession) -> None:
@@ -107,6 +124,7 @@ async def list_leads(
     start_date: datetime | None = Query(default=None),
     end_date: datetime | None = Query(default=None),
     assigned_user_id: str | None = Query(default=None),
+    branch_id: str | None = Query(default=None),
     quick_filter: str | None = Query(default=None),
     sort: str = Query(default="desc", pattern="^(asc|desc)$"),
     limit: int = Query(default=20, ge=1, le=100),
@@ -116,7 +134,7 @@ async def list_leads(
 ) -> LeadListResponse:
     assigned_scope_requested = quick_filter == "assigned_to_me"
     assigned_user_lookup_requested = bool(assigned_user_id)
-    if assigned_user_lookup_requested and auth.role != "admin" and not await _can_view_all_leads(auth, session):
+    if assigned_user_lookup_requested and auth.role != "super_admin" and auth.role != "admin" and not await _can_view_all_leads(auth, session):
         raise HTTPException(status_code=403, detail="Permission denied")
     if not assigned_scope_requested and not await _can_view_leads(auth, session):
         raise HTTPException(status_code=403, detail="Permission denied")
@@ -125,6 +143,8 @@ async def list_leads(
 
     if status_filter and status_filter != "all":
         filters.append(Lead.status == status_filter)
+    if branch_id:
+        filters.append(Lead.branch_id == branch_id)
     if stage_id:
         filters.append(Lead.lead_stage_id == stage_id)
     if source_id:
@@ -149,8 +169,6 @@ async def list_leads(
         filters.append(Lead.created_at >= start_date)
     if end_date:
         filters.append(Lead.created_at <= end_date)
-    if auth.role != "admin" and not await _can_view_all_leads(auth, session):
-        filters.append(or_(Lead.assigned_user_id == auth.user_id, Lead.assigned_agent_id == auth.user_id))
     if assigned_user_lookup_requested:
         filters.append(or_(Lead.assigned_user_id == assigned_user_id, Lead.assigned_agent_id == assigned_user_id))
     if assigned_scope_requested:
@@ -167,27 +185,38 @@ async def list_leads(
         query = query.where(*filters)
         count_query = count_query.where(*filters)
 
+    from app.api.deps import apply_tenant_filters
+    query = apply_tenant_filters(query, auth, Lead)
+    count_query = apply_tenant_filters(count_query, auth, Lead)
+
     order_column = Lead.created_at.asc() if sort == "asc" else Lead.created_at.desc()
     query = query.order_by(order_column).limit(limit).offset(offset)
     rows = (await session.execute(query)).scalars().all()
     total = (await session.execute(count_query)).scalar_one()
 
+    data_out = []
+    for r in rows:
+        l_out = LeadOut.model_validate(r)
+        l_out.assigned_user_ids = await _populate_lead_assignments(r, session)
+        data_out.append(l_out)
+
     return LeadListResponse(
-        data=[LeadOut.model_validate(row) for row in rows],
+        data=data_out,
         meta=PaginationMeta(total=total, limit=limit, offset=offset),
     )
 
 
 @router.get("/analytics/summary", response_model=LeadAnalyticsSummary)
 async def get_lead_analytics_summary(
-    _: AuthContext = Depends(get_current_auth),
+    auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> LeadAnalyticsSummary:
-    total = (await session.execute(select(func.count(Lead.id)))).scalar_one()
-    converted = (await session.execute(select(func.count(Lead.id)).where(Lead.converted_customer_id.is_not(None)))).scalar_one()
+    from app.api.deps import apply_tenant_filters
+    total = (await session.execute(apply_tenant_filters(select(func.count(Lead.id)), auth, Lead))).scalar_one()
+    converted = (await session.execute(apply_tenant_filters(select(func.count(Lead.id)).where(Lead.converted_customer_id.is_not(None)), auth, Lead))).scalar_one()
 
-    status_rows = (await session.execute(select(Lead.status, func.count(Lead.id)).group_by(Lead.status))).all()
-    source_rows = (await session.execute(select(Lead.source, func.count(Lead.id)).group_by(Lead.source))).all()
+    status_rows = (await session.execute(apply_tenant_filters(select(Lead.status, func.count(Lead.id)).group_by(Lead.status), auth, Lead))).all()
+    source_rows = (await session.execute(apply_tenant_filters(select(Lead.source, func.count(Lead.id)).group_by(Lead.source), auth, Lead))).all()
 
     return LeadAnalyticsSummary(
         total=total,
@@ -209,6 +238,8 @@ async def create_lead(
     session: AsyncSession = Depends(get_session_dep),
 ) -> LeadOut:
     data = payload.model_dump()
+    data["organization_id"] = auth.org_id
+    data["branch_id"] = auth.branch_id
     if data.get("priority"):
         data["priority"] = data["priority"].lower()
     if "tags" in data:
@@ -229,12 +260,22 @@ async def create_lead(
                 detail=f"Lead with this phone number already exists: {existing_name}",
             )
 
+    assigned_user_ids = data.pop("assigned_user_ids", None)
     entity = Lead(**data)
-    if not entity.assigned_user_id:
-        entity.assigned_user_id = auth.user_id
 
     session.add(entity)
     await session.flush()
+
+    if assigned_user_ids:
+        from app.db.models import Assignment
+        for uid in assigned_user_ids:
+            session.add(Assignment(
+                organization_id=auth.org_id,
+                lead_id=entity.id,
+                user_id=uid,
+                assigned_by_id=auth.user_id
+            ))
+
     await record_preference_history(
         session,
         workspace_id=auth.user_id,
@@ -244,7 +285,9 @@ async def create_lead(
     )
     await session.commit()
     await session.refresh(entity)
-    return LeadOut.model_validate(entity)
+    l_out = LeadOut.model_validate(entity)
+    l_out.assigned_user_ids = await _populate_lead_assignments(entity, session)
+    return l_out
 
 
 @router.post("/ai-convert", response_model=LeadCreate)
@@ -289,19 +332,23 @@ async def get_lead_from_conversation(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> LeadOut:
+    from app.api.deps import apply_tenant_filters
     lead = (
         await session.execute(
-            select(Lead)
-            .where(Lead.conversation_id == conversation_id)
-            .order_by(Lead.updated_at.desc())
-            .limit(1)
+            apply_tenant_filters(
+                select(Lead)
+                .where(Lead.conversation_id == conversation_id)
+                .order_by(Lead.updated_at.desc()),
+                auth,
+                Lead
+            ).limit(1)
         )
     ).scalar_one_or_none()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found for conversation")
-    if auth.role != "admin" and not await _can_view_all_leads(auth, session) and not _is_assigned_lead(lead, auth):
-        raise HTTPException(status_code=404, detail="Lead not found for conversation")
-    return LeadOut.model_validate(lead)
+    l_out = LeadOut.model_validate(lead)
+    l_out.assigned_user_ids = await _populate_lead_assignments(lead, session)
+    return l_out
 
 
 @router.post("/from-conversation/{conversation_id}", response_model=LeadOut, status_code=status.HTTP_201_CREATED)
@@ -362,10 +409,10 @@ async def get_lead(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> LeadOut:
-    lead = await _get_lead_or_404(lead_id, session)
-    if auth.role != "admin" and not await _can_view_all_leads(auth, session) and not _is_assigned_lead(lead, auth):
-        raise HTTPException(status_code=404, detail="Lead not found")
-    return LeadOut.model_validate(lead)
+    lead = await _get_lead_or_404(lead_id, session, auth)
+    l_out = LeadOut.model_validate(lead)
+    l_out.assigned_user_ids = await _populate_lead_assignments(lead, session)
+    return l_out
 
 
 @router.patch("/{lead_id}", response_model=LeadOut)
@@ -375,10 +422,8 @@ async def update_lead(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> LeadOut:
-    lead = await _get_lead_or_404(lead_id, session)
+    lead = await _get_lead_or_404(lead_id, session, auth)
     changes = payload.model_dump(exclude_unset=True)
-    if auth.role != "admin" and not await _can_view_all_leads(auth, session) and not _is_assigned_lead(lead, auth):
-        raise HTTPException(status_code=403, detail="Permission denied")
     if changes.get("priority"):
         changes["priority"] = changes["priority"].lower()
     if "tags" in changes:
@@ -400,6 +445,7 @@ async def update_lead(
                 )
 
     previous_status = lead.status
+    assigned_user_ids = changes.pop("assigned_user_ids", None)
     for key, value in changes.items():
         setattr(lead, key, value)
 
@@ -416,6 +462,18 @@ async def update_lead(
             changed_by_user_id=auth.user_id,
             change_reason="manual_update",
         )
+
+    if assigned_user_ids is not None:
+        from app.db.models import Assignment
+        from sqlalchemy import delete
+        await session.execute(delete(Assignment).where(Assignment.lead_id == lead.id))
+        for uid in assigned_user_ids:
+            session.add(Assignment(
+                organization_id=auth.org_id,
+                lead_id=lead.id,
+                user_id=uid,
+                assigned_by_id=auth.user_id
+            ))
 
     text_blob = " ".join(filter(None, [lead.notes, lead.raw_note, lead.address, lead.industry]))
     await record_preference_history(
@@ -435,7 +493,9 @@ async def update_lead(
 
     await session.commit()
     await session.refresh(lead)
-    return LeadOut.model_validate(lead)
+    l_out = LeadOut.model_validate(lead)
+    l_out.assigned_user_ids = await _populate_lead_assignments(lead, session)
+    return l_out
 
 
 @router.delete("/{lead_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -444,8 +504,8 @@ async def delete_lead(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> None:
-    lead = await _get_lead_or_404(lead_id, session)
-    if auth.role != "admin" and not await _can_view_all_leads(auth, session):
+    lead = await _get_lead_or_404(lead_id, session, auth)
+    if auth.role != "super_admin" and auth.role != "admin" and not await has_permission(session, auth.user_id, auth, "leads.manage"):
         raise HTTPException(status_code=403, detail="Permission denied")
     await session.delete(lead)
     await session.commit()
@@ -458,9 +518,7 @@ async def list_lead_activities(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> list[LeadActivityOut]:
-    lead = await _get_lead_or_404(lead_id, session)
-    if auth.role != "admin" and not await _can_view_all_leads(auth, session) and not _is_assigned_lead(lead, auth):
-        raise HTTPException(status_code=404, detail="Lead not found")
+    lead = await _get_lead_or_404(lead_id, session, auth)
     query = select(LeadActivity).where(LeadActivity.lead_id == lead_id)
     if activity_type:
         query = query.where(LeadActivity.activity_type == activity_type)
@@ -475,9 +533,7 @@ async def get_lead_timeline(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> list[LeadTimelineItem]:
-    lead = await _get_lead_or_404(lead_id, session)
-    if auth.role != "admin" and not await _can_view_all_leads(auth, session) and not _is_assigned_lead(lead, auth):
-        raise HTTPException(status_code=404, detail="Lead not found")
+    lead = await _get_lead_or_404(lead_id, session, auth)
     items: list[LeadTimelineItem] = [
         LeadTimelineItem(
             id=activity.id,
@@ -530,9 +586,7 @@ async def create_lead_activity(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> LeadActivityOut:
-    lead = await _get_lead_or_404(lead_id, session)
-    if auth.role != "admin" and not await _can_view_all_leads(auth, session) and not _is_assigned_lead(lead, auth):
-        raise HTTPException(status_code=404, detail="Lead not found")
+    lead = await _get_lead_or_404(lead_id, session, auth)
     data = payload.model_dump(by_alias=False)
     metadata = data.pop("metadata", None)
     activity = LeadActivity(
@@ -557,8 +611,8 @@ async def create_lead_share_link(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> LeadShareOut:
-    await _get_lead_or_404(lead_id, session)
-    if auth.role != "admin" and not await _can_view_all_leads(auth, session):
+    await _get_lead_or_404(lead_id, session, auth)
+    if auth.role != "super_admin" and auth.role != "admin" and not await _can_view_all_leads(auth, session):
         raise HTTPException(status_code=403, detail="Permission denied")
     org = None
     if auth.org_id:
@@ -611,9 +665,7 @@ async def update_lead_activity(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> LeadActivityOut:
-    lead = await _get_lead_or_404(lead_id, session)
-    if auth.role != "admin" and not await _can_view_all_leads(auth, session) and not _is_assigned_lead(lead, auth):
-        raise HTTPException(status_code=404, detail="Lead not found")
+    lead = await _get_lead_or_404(lead_id, session, auth)
     activity = await session.get(LeadActivity, activity_id)
     if not activity or activity.lead_id != lead_id:
         raise HTTPException(status_code=404, detail="Lead activity not found")
@@ -635,9 +687,7 @@ async def delete_lead_activity(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> None:
-    lead = await _get_lead_or_404(lead_id, session)
-    if auth.role != "admin" and not await _can_view_all_leads(auth, session) and not _is_assigned_lead(lead, auth):
-        raise HTTPException(status_code=404, detail="Lead not found")
+    lead = await _get_lead_or_404(lead_id, session, auth)
     activity = await session.get(LeadActivity, activity_id)
     if not activity or activity.lead_id != lead_id:
         raise HTTPException(status_code=404, detail="Lead activity not found")
@@ -652,8 +702,8 @@ async def convert_lead(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ):
-    lead = await _get_lead_or_404(lead_id, session)
-    if auth.role != "admin" and not await _can_view_all_leads(auth, session):
+    lead = await _get_lead_or_404(lead_id, session, auth)
+    if auth.role != "super_admin" and auth.role != "admin" and not await _can_view_all_leads(auth, session):
         raise HTTPException(status_code=403, detail="Permission denied")
     if lead.converted_customer_id:
         customer = await session.get(Customer, lead.converted_customer_id)
@@ -747,3 +797,244 @@ async def convert_lead(
         },
         "opportunity_id": opportunity.id,
     }
+
+
+@router.get("/export")
+async def export_leads(
+    status_filter: str | None = Query(default=None, alias="status"),
+    stage_id: str | None = Query(default=None),
+    source_id: str | None = Query(default=None),
+    tag: str | None = Query(default=None),
+    priority: str | None = Query(default=None),
+    search: str | None = Query(default=None),
+    start_date: datetime | None = Query(default=None),
+    end_date: datetime | None = Query(default=None),
+    assigned_user_id: str | None = Query(default=None),
+    branch_id: str | None = Query(default=None),
+    quick_filter: str | None = Query(default=None),
+    lead_ids: list[str] | None = Query(default=None),
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+):
+    if not await _can_view_leads(auth, session):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    filters = []
+
+    if lead_ids:
+        filters.append(Lead.id.in_(lead_ids))
+
+    if status_filter and status_filter != "all":
+        filters.append(Lead.status == status_filter)
+    if branch_id:
+        filters.append(Lead.branch_id == branch_id)
+    if stage_id:
+        filters.append(Lead.lead_stage_id == stage_id)
+    if source_id:
+        filters.append(Lead.lead_source_id == source_id)
+    if tag:
+        tag_value = tag.strip().lower()
+        if tag_value:
+            filters.append(Lead.tags.contains([tag_value]))
+    if priority and priority != "all":
+        filters.append(Lead.priority == priority.lower())
+    if search:
+        needle = f"%{search.strip()}%"
+        filters.append(
+            or_(
+                Lead.company_name.ilike(needle),
+                Lead.contact_person.ilike(needle),
+                Lead.phone.ilike(needle),
+                Lead.email.ilike(needle),
+            )
+        )
+    if start_date:
+        filters.append(Lead.created_at >= start_date)
+    if end_date:
+        filters.append(Lead.created_at <= end_date)
+    if assigned_user_id:
+        filters.append(or_(Lead.assigned_user_id == assigned_user_id, Lead.assigned_agent_id == assigned_user_id))
+    if quick_filter == "assigned_to_me":
+        filters.append(or_(Lead.assigned_user_id == auth.user_id, Lead.assigned_agent_id == auth.user_id))
+    elif quick_filter == "untouched":
+        filters.append(Lead.untouched.is_(True))
+    elif quick_filter == "followups_due":
+        filters.append(and_(Lead.follow_up_date.is_not(None), Lead.follow_up_date <= func.now()))
+
+    query = select(Lead)
+    if filters:
+        query = query.where(*filters)
+
+    from app.api.deps import apply_tenant_filters
+    query = apply_tenant_filters(query, auth, Lead)
+    query = query.order_by(Lead.created_at.desc())
+
+    rows = (await session.execute(query)).scalars().all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow([
+        "Company Name", "Contact Person", "Phone", "Email", 
+        "Address", "Last Education", "Priority", "Status", "Source", "Notes"
+    ])
+
+    for lead in rows:
+        writer.writerow([
+            lead.company_name or "",
+            lead.contact_person or "",
+            lead.phone or "",
+            lead.email or "",
+            lead.address or "",
+            lead.last_education or "",
+            lead.priority or "medium",
+            lead.status or "new",
+            lead.source or "",
+            lead.notes or ""
+        ])
+
+    output.seek(0)
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode("utf-8")),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=leads_export.csv"}
+    )
+
+
+@router.post("/bulk-upload")
+async def bulk_upload_leads(
+    file: UploadFile = File(...),
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+):
+    if auth.role != "super_admin" and auth.role != "admin" and not await has_permission(session, auth.user_id, auth, "leads.manage"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    content = await file.read()
+    try:
+        csv_text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        try:
+            csv_text = content.decode("latin1")
+        except Exception:
+            raise HTTPException(status_code=400, detail="Unable to decode file. Please upload a valid UTF-8 or Latin1 CSV file.")
+
+    reader = csv.DictReader(io.StringIO(csv_text))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=400, detail="Empty CSV headers.")
+
+    headers = [h.strip().lower() for h in reader.fieldnames]
+
+    name_field = None
+    for option in ["company name", "company/client name", "company_name", "name", "client name", "client_name"]:
+        if option in headers:
+            name_field = reader.fieldnames[headers.index(option)]
+            break
+
+    if not name_field:
+        raise HTTPException(status_code=400, detail="CSV must contain a 'Company Name' or 'Name' column.")
+
+    phone_field = None
+    email_field = None
+    address_field = None
+    education_field = None
+    priority_field = None
+    status_field = None
+    source_field = None
+    notes_field = None
+    contact_person_field = None
+
+    for idx, h in enumerate(headers):
+        field_lower = h.strip()
+        if field_lower in ["phone", "phone number", "phone_number"]:
+            phone_field = reader.fieldnames[idx]
+        elif field_lower in ["email", "email address", "email_address"]:
+            email_field = reader.fieldnames[idx]
+        elif field_lower in ["address", "location"]:
+            address_field = reader.fieldnames[idx]
+        elif field_lower in ["last education", "education", "last_education"]:
+            education_field = reader.fieldnames[idx]
+        elif field_lower in ["priority"]:
+            priority_field = reader.fieldnames[idx]
+        elif field_lower in ["status", "stage", "lead stage", "lead_stage"]:
+            status_field = reader.fieldnames[idx]
+        elif field_lower in ["source", "lead source", "lead_source"]:
+            source_field = reader.fieldnames[idx]
+        elif field_lower in ["notes", "note", "description"]:
+            notes_field = reader.fieldnames[idx]
+        elif field_lower in ["contact person", "contact_person"]:
+            contact_person_field = reader.fieldnames[idx]
+
+    success_count = 0
+    errors = []
+
+    # Get existing phone numbers in organization
+    existing_phones_res = await session.execute(
+        select(Lead.phone).where(Lead.organization_id == auth.org_id, Lead.phone.is_not(None))
+    )
+    existing_phones = set(existing_phones_res.scalars().all())
+
+    # Get pipeline stages for the organization
+    from app.db.models import Pipeline, PipelineStage
+    org_stages_res = await session.execute(
+        select(PipelineStage)
+        .join(Pipeline)
+        .where(Pipeline.organization_id == auth.org_id)
+    )
+    org_stages = list(org_stages_res.scalars().all())
+    org_stage_map = {s.name.lower().strip(): s for s in org_stages}
+
+    row_idx = 1
+    for row in reader:
+        row_idx += 1
+        company_name = row.get(name_field)
+        if not company_name or not company_name.strip():
+            errors.append(f"Row {row_idx}: Missing company/client name")
+            continue
+
+        phone = row.get(phone_field).strip() if phone_field and row.get(phone_field) else None
+        if phone and phone in existing_phones:
+            errors.append(f"Row {row_idx}: Phone number '{phone}' already exists")
+            continue
+
+        email = row.get(email_field).strip() if email_field and row.get(email_field) else None
+        address = row.get(address_field).strip() if address_field and row.get(address_field) else None
+        education = row.get(education_field).strip() if education_field and row.get(education_field) else None
+        priority = row.get(priority_field).strip().lower() if priority_field and row.get(priority_field) else "medium"
+        if priority not in ["low", "medium", "high"]:
+            priority = "medium"
+
+        status_val = row.get(status_field).strip() if status_field and row.get(status_field) else "new"
+        source = row.get(source_field).strip() if source_field and row.get(source_field) else None
+        notes = row.get(notes_field).strip() if notes_field and row.get(notes_field) else None
+        contact_person = row.get(contact_person_field).strip() if contact_person_field and row.get(contact_person_field) else None
+
+        lead_stage_id = None
+        status_val_lower = status_val.lower().strip()
+        if status_val_lower in org_stage_map:
+            lead_stage_id = org_stage_map[status_val_lower].id
+            status_val = org_stage_map[status_val_lower].name
+
+        lead_obj = Lead(
+            organization_id=auth.org_id,
+            branch_id=auth.branch_id,
+            company_name=company_name.strip(),
+            contact_person=contact_person,
+            phone=phone,
+            email=email,
+            address=address,
+            last_education=education,
+            priority=priority,
+            status=status_val,
+            lead_stage_id=lead_stage_id,
+            source=source,
+            notes=notes,
+            untouched=True
+        )
+        session.add(lead_obj)
+        if phone:
+            existing_phones.add(phone)
+        success_count += 1
+
+    await session.commit()
+    return {"success": True, "imported_count": success_count, "errors": errors}

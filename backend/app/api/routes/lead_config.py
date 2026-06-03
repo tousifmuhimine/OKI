@@ -117,41 +117,80 @@ async def delete_lead_source(
 @router.get("/lead-stages", response_model=list[LeadStageOut])
 async def list_lead_stages(
     active_only: bool = Query(default=False),
-    _: AuthContext = Depends(get_current_auth),
+    auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> list[LeadStageOut]:
-    return await _list_entities(LeadStage, LeadStageOut, session, active_only)
+    from sqlalchemy import or_
+    query = select(LeadStage).where(
+        or_(
+            LeadStage.organization_id == auth.org_id,
+            LeadStage.organization_id.is_(None)
+        )
+    )
+    if active_only:
+        query = query.where(LeadStage.is_active.is_(True))
+    query = query.order_by(LeadStage.position.asc(), LeadStage.name.asc())
+    rows = (await session.execute(query)).scalars().all()
+    return [LeadStageOut.model_validate(row) for row in rows]
 
 
 @router.post("/lead-stages", response_model=LeadStageOut, status_code=status.HTTP_201_CREATED)
 async def create_lead_stage(
     payload: LeadStageCreate,
-    _: AuthContext = Depends(get_current_auth),
+    auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> LeadStageOut:
     if payload.position == 0:
-        max_position = (await session.execute(select(func.max(LeadStage.position)))).scalar_one_or_none() or 0
+        max_position = (await session.execute(
+            select(func.max(LeadStage.position)).where(LeadStage.organization_id == auth.org_id)
+        )).scalar_one_or_none() or 0
         payload.position = max_position + 1
-    return await _create_entity(LeadStage, LeadStageOut, payload, session)
+    
+    data = payload.model_dump()
+    data["organization_id"] = auth.org_id
+    entity = LeadStage(**data)
+    session.add(entity)
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail="A configuration item with this name already exists") from exc
+    await session.refresh(entity)
+    return LeadStageOut.model_validate(entity)
 
 
 @router.patch("/lead-stages/{item_id}", response_model=LeadStageOut)
 async def update_lead_stage(
     item_id: str,
     payload: LeadStageUpdate,
-    _: AuthContext = Depends(get_current_auth),
+    auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> LeadStageOut:
-    return await _update_entity(LeadStage, LeadStageOut, item_id, payload, session)
+    entity = await session.get(LeadStage, item_id)
+    if not entity or (entity.organization_id and entity.organization_id != auth.org_id):
+        raise HTTPException(status_code=404, detail="Configuration item not found")
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(entity, key, value)
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail="A configuration item with this name already exists") from exc
+    await session.refresh(entity)
+    return LeadStageOut.model_validate(entity)
 
 
 @router.delete("/lead-stages/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_lead_stage(
     item_id: str,
-    _: AuthContext = Depends(get_current_auth),
+    auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> None:
-    await _delete_entity(LeadStage, item_id, session)
+    entity = await session.get(LeadStage, item_id)
+    if not entity or (entity.organization_id and entity.organization_id != auth.org_id):
+        raise HTTPException(status_code=404, detail="Configuration item not found")
+    entity.is_active = False
+    await session.commit()
 
 
 def _named_routes(path: str, model: ConfigModel):
