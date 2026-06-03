@@ -22,7 +22,12 @@ class AuthContext:
     branch_id: str | None = None
 
 
-async def _ensure_organization_initialized(session: AsyncSession, org_id: str) -> None:
+async def _ensure_organization_initialized(
+    session: AsyncSession,
+    org_id: str,
+    company_name: str | None = None,
+    org_type_code: str | None = None,
+) -> None:
     from app.db.models import Organization, OrganizationType
     from sqlalchemy import select
     from app.services.industry_seeder import seed_organization_defaults, seed_organization_types
@@ -35,26 +40,43 @@ async def _ensure_organization_initialized(session: AsyncSession, org_id: str) -
         is_dev = (org_id == "dev-org")
         org_type_id = None
         default_type = None
-        if is_dev:
-            default_type = (await session.execute(select(OrganizationType).where(OrganizationType.code == "study_abroad"))).scalar_one_or_none()
+        
+        resolved_type_code = org_type_code or ("study_abroad" if is_dev else None)
+        if resolved_type_code:
+            default_type = (await session.execute(
+                select(OrganizationType).where(OrganizationType.code == resolved_type_code)
+            )).scalar_one_or_none()
             org_type_id = default_type.id if default_type else None
+
+        default_company_name = company_name or ("Dev Org" if is_dev else "My Organization")
 
         org = Organization(
             id=org_id,
-            company_name="My Organization" if org_id != "dev-org" else "Dev Org",
+            company_name=default_company_name,
             organization_type_id=org_type_id
         )
         session.add(org)
         await session.flush()
-        if is_dev and default_type:
+        if default_type:
             await seed_organization_defaults(session, org.id, default_type.code)
         await _backfill_org_data(session, org.id)
         await session.commit()
-    elif not org.organization_type_id and org_id == "dev-org":
-        default_type = (await session.execute(select(OrganizationType).where(OrganizationType.code == "study_abroad"))).scalar_one_or_none()
-        if default_type:
-            org.organization_type_id = default_type.id
-            await seed_organization_defaults(session, org.id, default_type.code)
+    else:
+        dirty = False
+        if not org.organization_type_id:
+            resolved_type_code = org_type_code or ("study_abroad" if org_id == "dev-org" else None)
+            if resolved_type_code:
+                default_type = (await session.execute(
+                    select(OrganizationType).where(OrganizationType.code == resolved_type_code)
+                )).scalar_one_or_none()
+                if default_type:
+                    org.organization_type_id = default_type.id
+                    await seed_organization_defaults(session, org.id, default_type.code)
+                    dirty = True
+        if (org.company_name == "My Organization" or org.company_name == "Dev Org") and company_name:
+            org.company_name = company_name
+            dirty = True
+        if dirty or org_id == "dev-org":
             await _backfill_org_data(session, org.id)
             await session.commit()
 
@@ -97,7 +119,9 @@ async def get_current_auth(
             branch_id = local_user.branch_id
             local_org_id = local_user.organization_id
         else:
-            role_code = payload.get("role") or payload.get("custom_role") or "super_admin"
+            role_code = payload.get("custom_role") or payload.get("role") or "super_admin"
+            if role_code in ("authenticated", "anon"):
+                role_code = "super_admin"
             
             role_codes = ["super_admin", "admin", "branch_admin", "individual_agent", "employee"]
             for rc in role_codes:
@@ -133,7 +157,15 @@ async def get_current_auth(
 
         resolved_org_id = local_org_id or org_id
         if resolved_org_id:
-            await _ensure_organization_initialized(session, resolved_org_id)
+            user_meta = payload.get("user_metadata", {})
+            meta_company_name = user_meta.get("company_name")
+            meta_org_type_code = user_meta.get("org_type_code")
+            await _ensure_organization_initialized(
+                session,
+                resolved_org_id,
+                company_name=meta_company_name,
+                org_type_code=meta_org_type_code
+            )
 
         return AuthContext(
             user_id=user_id,
@@ -165,7 +197,7 @@ async def get_current_auth(
             sa_role = (await session.execute(select(Role).where(Role.code == "super_admin"))).scalar_one()
             local_user = User(
                 id=user_id,
-                organization_id=org.id,
+                organization_id=org_id,
                 email="dev@local",
                 role_id=sa_role.id
             )
@@ -173,7 +205,7 @@ async def get_current_auth(
             await session.commit()
             role_code = "super_admin"
             branch_id = None
-            local_org_id = org.id
+            local_org_id = org_id
         else:
             role_code = (await session.execute(select(Role.code).where(Role.id == local_user.role_id))).scalar_one_or_none() or "super_admin"
             branch_id = local_user.branch_id
