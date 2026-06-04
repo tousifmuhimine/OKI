@@ -503,9 +503,27 @@ function LeadsContent() {
   // Load current user role and org type code
   useEffect(() => {
     if (typeof window !== "undefined") {
-      setOrgTypeCode(sessionStorage.getItem("oki_org_type_code") || "study_abroad");
+      const code = sessionStorage.getItem("oki_org_type_code") || "study_abroad";
+      setOrgTypeCode(code);
+      setIndustry(code);
     }
-    apiRequest<{ id: string; role_code: string } | { id: string; role: string }>("/users/me")
+
+    // Fetch organization info to get the dynamic type code
+    apiRequest<{ organization_type_code: string | null }>("/organizations/me")
+      .then((org) => {
+        if (org.organization_type_code) {
+          setOrgTypeCode(org.organization_type_code);
+          setIndustry(org.organization_type_code);
+          if (typeof window !== "undefined") {
+            sessionStorage.setItem("oki_org_type_code", org.organization_type_code);
+          }
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to fetch organization info:", err);
+      });
+
+    apiRequest<{ id: string; role_code: string } | { id: string; role: string }>("/organizations/users/me")
       .then((user: any) => {
         const rawRole = user.role_code || user.role || "agent";
         const role = rawRole === "individual_agent" ? "agent" : rawRole;
@@ -521,6 +539,12 @@ function LeadsContent() {
         });
       });
   }, []);
+
+  useEffect(() => {
+    if (orgTypeCode) {
+      setIndustry(orgTypeCode);
+    }
+  }, [orgTypeCode, createLeadOpen]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -614,7 +638,7 @@ function LeadsContent() {
       setPhone(result.phone || "");
       setEmail(result.email || "");
       setAddress(result.address || "");
-      setIndustry(result.industry || "");
+      setIndustry(orgTypeCode || result.industry || "");
       setSource(result.source || "manual");
       // Store industry-specific data
       setIndustryData(result.industry_data ?? null);
@@ -661,7 +685,7 @@ function LeadsContent() {
       setPhone("");
       setEmail("");
       setAddress("");
-      setIndustry("");
+      setIndustry(orgTypeCode || "");
       setSource("manual");
       setLeadSourceId("");
       setLeadAreaId("");
@@ -1261,6 +1285,56 @@ function LeadsContent() {
           </div>
         )}
 
+        {orgTypeCode === "real_estate" && (
+          <div className="rounded-xl border border-slate-100 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/5 text-left">
+            <h4 className="mb-4 flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-200">
+              <div className="flex h-6 w-6 items-center justify-center rounded bg-slate-200 dark:bg-slate-700">
+                <Globe size={12} className="text-slate-700 dark:text-slate-200" />
+              </div>
+              Real Estate Custom Data
+            </h4>
+            <div className="grid grid-cols-2 gap-6">
+              <div>
+                <span className="mb-1 block text-[11px] font-semibold text-slate-500">Budget (BDT)</span>
+                <p className="text-sm font-semibold text-slate-900 dark:text-white">{(selectedLead.industry_data as any)?.budget || "N/A"}</p>
+              </div>
+              <div>
+                <span className="mb-1 block text-[11px] font-semibold text-slate-500">Square Feet</span>
+                <p className="text-sm font-semibold text-slate-900 dark:text-white">{(selectedLead.industry_data as any)?.square_feet || "N/A"}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {orgTypeCode === "ecommerce" && (
+          <div className="rounded-xl border border-slate-100 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/5 text-left">
+            <h4 className="mb-4 flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-200">
+              <div className="flex h-6 w-6 items-center justify-center rounded bg-slate-200 dark:bg-slate-700">
+                <Globe size={12} className="text-slate-700 dark:text-slate-200" />
+              </div>
+              Ecommerce Custom Data
+            </h4>
+            <div className="grid grid-cols-2 gap-6">
+              <div>
+                <span className="mb-1 block text-[11px] font-semibold text-slate-500">Product Interest</span>
+                <p className="text-sm font-semibold text-slate-900 dark:text-white">{(selectedLead.industry_data as any)?.product_interest || "N/A"}</p>
+              </div>
+              <div>
+                <span className="mb-1 block text-[11px] font-semibold text-slate-500">Delivery Location</span>
+                <p className="text-sm font-semibold text-slate-900 dark:text-white">{(selectedLead.industry_data as any)?.delivery_location || "N/A"}</p>
+              </div>
+              <div>
+                <span className="mb-1 block text-[11px] font-semibold text-slate-500">Urgency Level</span>
+                <p className="text-sm font-semibold text-slate-900 dark:text-white">{(selectedLead.industry_data as any)?.urgency_level || "N/A"}</p>
+              </div>
+              <div>
+                <span className="mb-1 block text-[11px] font-semibold text-slate-500">Preferred Platform</span>
+                <p className="text-sm font-semibold text-slate-900 dark:text-white">{(selectedLead.industry_data as any)?.preferred_platform || "N/A"}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="rounded-xl border border-slate-100 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/5 text-left">
           <h4 className="mb-4 flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-200">
             <div className="flex h-6 w-6 items-center justify-center rounded bg-slate-200 dark:bg-slate-700">
@@ -1443,7 +1517,7 @@ function LeadsContent() {
             { id: "assigned", label: "Assigned to Me" },
             { id: "untouched", label: "Untouched Leads" },
             { id: "followup", label: "Follow-ups Due" },
-          ].filter(f => !(f.id === "assigned" && currentUser?.role === "admin")).map(f => (
+          ].filter(f => !(f.id === "assigned" && (currentUser?.role === "admin" || currentUser?.role === "super_admin"))).map(f => (
             <button 
               key={f.id}
               onClick={() => setQuickFilter(f.id)}
@@ -1465,7 +1539,7 @@ function LeadsContent() {
         ) : null}
 
         {/* Stats — admins see global analytics, agents see only their assigned count */}
-        {currentUser?.role === "admin" ? (
+        {(currentUser?.role === "admin" || currentUser?.role === "super_admin") ? (
           <div className="mb-5 grid grid-cols-1 gap-3 min-[430px]:grid-cols-2 xl:grid-cols-4">
             <div className="glass-card p-4">
               <div className="flex items-center justify-between">
@@ -1607,14 +1681,6 @@ function LeadsContent() {
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     <ThemedSelect
-                      name="industry"
-                      value={industry}
-                      onChange={setIndustry}
-                      icon={Building2}
-                      placeholder="Select Industry"
-                      options={industryOptions}
-                    />
-                    <ThemedSelect
                       name="lead_source_id"
                       value={leadSourceId}
                       onChange={(value) => {
@@ -1628,8 +1694,6 @@ function LeadsContent() {
                         ...configs.sources.map((item) => ({ value: item.id, label: item.name })),
                       ]}
                     />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
                     <ThemedSelect
                       name="lead_stage_id"
                       value={leadStageId}
@@ -1638,6 +1702,8 @@ function LeadsContent() {
                       placeholder="Lead Stage"
                       options={configs.stages.map((item) => ({ value: item.id, label: item.name }))}
                     />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
                     <ThemedSelect
                       name="priority"
                       value={leadPriority}
@@ -1650,8 +1716,6 @@ function LeadsContent() {
                         { value: "low", label: "Low" },
                       ]}
                     />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
                     <ThemedSelect
                       name="lead_area_id"
                       value={leadAreaId}
@@ -1660,6 +1724,8 @@ function LeadsContent() {
                       placeholder="Location"
                       options={[{ value: "", label: "No Location" }, ...configs.areas.map((item) => ({ value: item.id, label: item.name }))]}
                     />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
                     {orgTypeCode === "study_abroad" ? (
                       <label className="relative block">
                         <User size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
@@ -1681,8 +1747,6 @@ function LeadsContent() {
                         options={[{ value: "", label: "No Profession" }, ...configs.professions.map((item) => ({ value: item.id, label: item.name }))]}
                       />
                     )}
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
                     <ThemedSelect
                       name="assigned_user_id"
                       value={leadAssignedUserId}
@@ -2293,7 +2357,7 @@ function LeadsContent() {
                               <button onClick={() => { openLead(lead.id); }} className="rounded p-1.5 hover:bg-white/60 hover:text-brand-500 dark:hover:bg-white/10">
                                 <Eye size={16} />
                               </button>
-                              {currentUser?.role === "admin" && (
+                              {(currentUser?.role === "admin" || currentUser?.role === "super_admin") && (
                                 <button onClick={() => void deleteLead(lead.id)} className="rounded p-1.5 hover:bg-rose-500/10 hover:text-rose-500">
                                   <Trash2 size={16} />
                                 </button>
@@ -2305,7 +2369,7 @@ function LeadsContent() {
                                 {actionDropdownId === lead.id && (
                                   <div className="absolute right-0 top-full mt-1 w-40 rounded-xl bg-white shadow-xl border border-slate-100 dark:bg-slate-800 dark:border-slate-700 z-50 overflow-hidden text-left" onMouseLeave={() => setActionDropdownId(null)}>
                                     <button onClick={(e) => { e.stopPropagation(); setError(null); setEditModalLeadId(lead.id); setActionDropdownId(null); }} className="w-full text-left px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700 flex items-center gap-2"><Edit2 size={14} /> Edit Lead</button>
-                                    {currentUser?.role === "admin" && (
+                                    {(currentUser?.role === "admin" || currentUser?.role === "super_admin") && (
                                       <button onClick={(e) => { e.stopPropagation(); setBudgetModalLeadId(lead.id); setActionDropdownId(null); }} className="w-full text-left px-4 py-2 text-sm font-semibold text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 flex items-center gap-2"><CheckCircle2 size={14} /> Convert</button>
                                     )}
                                   </div>
@@ -2690,6 +2754,89 @@ function LeadsContent() {
                                 ))}
                               </div>
                             </div>
+                          </div>
+                        </div>
+                      )}
+                      {orgTypeCode === "real_estate" && (
+                        <div className="rounded-xl border border-slate-100 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/5 text-left mt-4">
+                          <h4 className="mb-4 flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-200">
+                            <div className="flex h-6 w-6 items-center justify-center rounded bg-slate-200 dark:bg-slate-700">
+                              <Sparkles size={12} className="text-slate-700 dark:text-slate-200" />
+                            </div>
+                            Real Estate Context Details
+                          </h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <label className="block text-left">
+                              <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Budget (BDT)</span>
+                              <input
+                                type="number"
+                                value={(editIndustryData?.budget as string) || ""}
+                                onChange={(e) => updateEditIndustryField("budget", e.target.value)}
+                                className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-900 outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+                              />
+                            </label>
+                            <label className="block text-left">
+                              <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Square Feet</span>
+                              <input
+                                type="number"
+                                value={(editIndustryData?.square_feet as string) || ""}
+                                onChange={(e) => updateEditIndustryField("square_feet", e.target.value)}
+                                className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-900 outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      )}
+                      {orgTypeCode === "ecommerce" && (
+                        <div className="rounded-xl border border-slate-100 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/5 text-left mt-4">
+                          <h4 className="mb-4 flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-200">
+                            <div className="flex h-6 w-6 items-center justify-center rounded bg-slate-200 dark:bg-slate-700">
+                              <Sparkles size={12} className="text-slate-700 dark:text-slate-200" />
+                            </div>
+                            Ecommerce Context Details
+                          </h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <label className="block text-left">
+                              <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Product Interest</span>
+                              <input
+                                value={(editIndustryData?.product_interest as string) || ""}
+                                onChange={(e) => updateEditIndustryField("product_interest", e.target.value)}
+                                className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-900 outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+                              />
+                            </label>
+                            <label className="block text-left">
+                              <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Delivery Location</span>
+                              <input
+                                value={(editIndustryData?.delivery_location as string) || ""}
+                                onChange={(e) => updateEditIndustryField("delivery_location", e.target.value)}
+                                className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-900 outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+                              />
+                            </label>
+                            <label className="block text-left">
+                              <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Urgency Level</span>
+                              <select
+                                value={(editIndustryData?.urgency_level as string) || ""}
+                                onChange={(e) => updateEditIndustryField("urgency_level", e.target.value)}
+                                className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-900 outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+                              >
+                                <option value="">Select Urgency</option>
+                                <option value="Low">Low</option>
+                                <option value="Medium">Medium</option>
+                                <option value="High">High</option>
+                              </select>
+                            </label>
+                            <label className="block text-left">
+                              <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Preferred Platform</span>
+                              <select
+                                value={(editIndustryData?.preferred_platform as string) || ""}
+                                onChange={(e) => updateEditIndustryField("preferred_platform", e.target.value)}
+                                className="h-10 w-full rounded-xl border border-white/50 bg-white/50 px-3 text-sm text-slate-900 outline-none focus:border-brand-400 dark:border-white/10 dark:bg-black/20 dark:text-white"
+                              >
+                                <option value="">Select Platform</option>
+                                <option value="Messenger">Messenger</option>
+                                <option value="WhatsApp">WhatsApp</option>
+                              </select>
+                            </label>
                           </div>
                         </div>
                       )}

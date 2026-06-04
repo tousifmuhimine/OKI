@@ -14,7 +14,7 @@ router = APIRouter()
 
 
 async def _can_view_customers(auth: AuthContext, session: AsyncSession) -> bool:
-    return auth.role == "admin" or await has_permission(session, auth.user_id, auth, "customers.view") or await has_permission(session, auth.user_id, auth, "customers.manage")
+    return auth.role == "super_admin" or await has_permission(session, auth.user_id, auth, "customers.view") or await has_permission(session, auth.user_id, auth, "customers.manage")
 
 
 async def _populate_customer_assignments(customer_obj: Customer, session: AsyncSession) -> list[str]:
@@ -225,7 +225,7 @@ async def update_customer(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> CustomerOut:
-    if auth.role != "admin" and not await has_permission(session, auth.user_id, auth, "customers.manage"):
+    if auth.role != "super_admin" and not await has_permission(session, auth.user_id, auth, "customers.manage"):
         raise HTTPException(status_code=403, detail="Permission denied")
     entity = await session.get(Customer, customer_id)
     if not entity:
@@ -269,7 +269,7 @@ async def delete_customer(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> None:
-    if auth.role != "admin" and not await has_permission(session, auth.user_id, auth, "customers.manage"):
+    if auth.role != "super_admin" and not await has_permission(session, auth.user_id, auth, "customers.manage"):
         raise HTTPException(status_code=403, detail="Permission denied")
     entity = await session.get(Customer, customer_id)
     if not entity:

@@ -82,4 +82,7 @@ export function clearAllAuthState(): void {
   clearDemoSession();
   clearBrowserAuthSession();
   clearSupabaseAuthStorage();
+  if (typeof window !== "undefined") {
+    window.sessionStorage.removeItem("oki_org_type_code");
+  }
 }

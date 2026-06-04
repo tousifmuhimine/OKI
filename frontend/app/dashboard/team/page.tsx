@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Users, Plus, Mail, ShieldCheck, UserCircle, Trash2,
   RefreshCw, ChevronDown, BarChart2, CheckCircle, Clock,
-  AlertTriangle, X, Loader2, UserPlus, Crown, GitMerge, MapPin, Briefcase, Award, ChevronRight
+  AlertTriangle, X, Loader2, UserPlus, Crown, GitMerge, MapPin, Briefcase, Award, ChevronRight,
+  Building2
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 import { ProtectedPage } from "@/components/protected-page";
@@ -32,10 +33,16 @@ type Branch = {
 
 const ROLE_PRESETS = [
   { code: "super_admin", label: "Super Admin" },
-  { code: "admin", label: "Admin" },
   { code: "branch_admin", label: "Branch Admin" },
   { code: "individual_agent", label: "Agent" },
   { code: "employee", label: "Employee" }
+] as const;
+
+const INDUSTRIES = [
+  { code: "study_abroad", name: "Study Abroad", description: "Counselors, application, visa & ticket tracking" },
+  { code: "ecommerce", name: "E-commerce", description: "Orders, packaging, shipping & return pipeline" },
+  { code: "vendors_interior", name: "Vendors & Interior", description: "Requirements, proposals & project milestones" },
+  { code: "real_estate", name: "Real Estate", description: "Site visits, inquiries & property bookings" },
 ] as const;
 
 function roleColor(role: string | null) {
@@ -163,7 +170,7 @@ export default function TeamDataPage() {
   const [profileLoading, setProfileLoading] = useState(false);
 
   // Tab mode
-  const [activeTab, setActiveTab] = useState<"directory" | "tree">("directory");
+  const [activeTab, setActiveTab] = useState<"directory" | "tree" | "workspace">("directory");
 
   // User details editing state
   const [editRole, setEditRole] = useState<string>("");
@@ -174,13 +181,31 @@ export default function TeamDataPage() {
 
   // Add user modal state
   const [showAdd, setShowAdd] = useState(false);
-  const [addUserType, setAddUserType] = useState<"admin" | "member">("member");
   const [newEmail, setNewEmail] = useState("");
   const [newName, setNewName] = useState("");
   const [newRole, setNewRole] = useState<string>("employee");
   const [newPassword, setNewPassword] = useState("");
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+
+  // Workspace settings state
+  const [orgDetails, setOrgDetails] = useState<{
+    id: string;
+    company_name: string;
+    organization_type_code: string | null;
+    organization_type_name: string | null;
+  } | null>(null);
+  const [editOrgName, setEditOrgName] = useState("");
+  const [editOrgType, setEditOrgType] = useState("");
+  const [savingOrg, setSavingOrg] = useState(false);
+  const [orgError, setOrgError] = useState<string | null>(null);
+
+  // Branch creation state
+  const [showAddBranch, setShowAddBranch] = useState(false);
+  const [newBranchName, setNewBranchName] = useState("");
+  const [newBranchLocation, setNewBranchLocation] = useState("");
+  const [addingBranch, setAddingBranch] = useState(false);
+  const [branchError, setBranchError] = useState<string | null>(null);
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -213,10 +238,27 @@ export default function TeamDataPage() {
     }
   };
 
+  const fetchOrgDetails = async () => {
+    try {
+      const res = await apiRequest<{
+        id: string;
+        company_name: string;
+        organization_type_code: string | null;
+        organization_type_name: string | null;
+      }>("/organizations/me");
+      setOrgDetails(res);
+      setEditOrgName(res.company_name);
+      setEditOrgType(res.organization_type_code || "");
+    } catch {
+      // ignore
+    }
+  };
+
   useEffect(() => {
     void fetchUsers();
     void fetchBranches();
     void fetchCurrentUser();
+    void fetchOrgDetails();
   }, []);
 
   // When selectedUser is set, initialize editing states
@@ -250,6 +292,83 @@ export default function TeamDataPage() {
       setSaveError((err as Error).message);
     } finally {
       setSavingUser(false);
+    }
+  };
+
+  const handleDeleteUser = async (userId: string) => {
+    if (!window.confirm("Are you sure you want to delete this team member? This action is permanent and will delete the user's account from Supabase and the local database.")) return;
+    setSavingUser(true);
+    setSaveError(null);
+    try {
+      await apiRequest(`/organizations/users/${userId}`, {
+        method: "DELETE",
+      });
+      // Remove from local users state
+      setUsers(prev => prev.filter(u => u.id !== userId));
+      setSelectedUser(null);
+    } catch (err) {
+      setSaveError((err as Error).message);
+    } finally {
+      setSavingUser(false);
+    }
+  };
+
+  const handleUpdateOrg = async () => {
+    if (!editOrgName.trim()) {
+      setOrgError("Company name cannot be empty");
+      return;
+    }
+    setSavingOrg(true);
+    setOrgError(null);
+    try {
+      const res = await apiRequest<{
+        id: string;
+        company_name: string;
+        organization_type_code: string | null;
+        organization_type_name: string | null;
+      }>("/organizations/me", {
+        method: "PATCH",
+        body: JSON.stringify({
+          company_name: editOrgName.trim(),
+          organization_type_code: editOrgType,
+        }),
+      });
+      setOrgDetails(res);
+      // If organization type code changes, update sessionStorage so module reloads correctly
+      if (res.organization_type_code && typeof window !== "undefined") {
+        sessionStorage.setItem("oki_org_type_code", res.organization_type_code);
+      }
+      alert("Workspace details updated successfully! Please reload the page if you changed the business industry module.");
+    } catch (err) {
+      setOrgError((err as Error).message);
+    } finally {
+      setSavingOrg(false);
+    }
+  };
+
+  const handleAddBranch = async () => {
+    if (!newBranchName.trim()) {
+      setBranchError("Branch name is required");
+      return;
+    }
+    setAddingBranch(true);
+    setBranchError(null);
+    try {
+      const res = await apiRequest<Branch>("/organizations/branches", {
+        method: "POST",
+        body: JSON.stringify({
+          name: newBranchName.trim(),
+          location: newBranchLocation.trim() || null,
+        }),
+      });
+      setBranches(prev => [...prev, res]);
+      setShowAddBranch(false);
+      setNewBranchName("");
+      setNewBranchLocation("");
+    } catch (err) {
+      setBranchError((err as Error).message);
+    } finally {
+      setAddingBranch(false);
     }
   };
 
@@ -291,14 +410,13 @@ export default function TeamDataPage() {
     setAdding(true);
     setAddError(null);
     try {
-      const roleToCreate = addUserType === "admin" ? "admin" : newRole;
       await apiRequest("/admin/users", {
         method: "POST",
         body: JSON.stringify({
           email: newEmail.trim(),
           password: newPassword,
           full_name: newName.trim(),
-          role: roleToCreate,
+          role: newRole,
         }),
       });
       setShowAdd(false);
@@ -306,7 +424,6 @@ export default function TeamDataPage() {
       setNewName("");
       setNewPassword("");
       setNewRole("employee");
-      setAddUserType("member");
       await fetchUsers();
     } catch (err) {
       setAddError((err as Error).message);
@@ -365,7 +482,7 @@ export default function TeamDataPage() {
         )}
 
         {/* View Mode Tabs */}
-        <div className="mb-6 flex space-x-1 rounded-xl bg-slate-100 dark:bg-black/20 p-1 max-w-[320px] backdrop-blur-md">
+        <div className="mb-6 flex space-x-1 rounded-xl bg-slate-100 dark:bg-black/20 p-1 max-w-[480px] backdrop-blur-md">
           <button
             type="button"
             onClick={() => setActiveTab("directory")}
@@ -388,6 +505,17 @@ export default function TeamDataPage() {
           >
             Hierarchy Tree
           </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("workspace")}
+            className={`flex-1 rounded-lg py-1.5 text-xs font-semibold transition ${
+              activeTab === "workspace"
+                ? "bg-white text-slate-900 shadow-sm dark:bg-white/15 dark:text-white"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+            }`}
+          >
+            Workspace & Branches
+          </button>
         </div>
 
         {loading ? (
@@ -402,7 +530,7 @@ export default function TeamDataPage() {
               <div className="flex items-center justify-between border-b border-white/20 px-5 py-4 dark:border-white/10">
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
                   <Crown size={16} className="text-purple-500" />
-                  Administrators
+                  Super Admin
                   <span className="rounded-full bg-purple-500/15 px-2.5 py-0.5 text-[10px] font-semibold text-purple-700 dark:text-purple-300">
                     {admins.length}
                   </span>
@@ -411,14 +539,14 @@ export default function TeamDataPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      setAddUserType("admin");
+                      setNewRole("super_admin");
                       setShowAdd(true);
                       setAddError(null);
                     }}
                     className="flex h-8 items-center gap-1 rounded-lg bg-purple-500/20 px-2.5 text-xs font-semibold text-purple-700 hover:bg-purple-500/30 transition dark:text-purple-300"
                   >
                     <Plus size={12} />
-                    Add Admin
+                    Add Super Admin
                   </button>
                 )}
               </div>
@@ -474,6 +602,20 @@ export default function TeamDataPage() {
                     {branchAdmins.length}
                   </span>
                 </div>
+                {isAuthorized && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewRole("branch_admin");
+                      setShowAdd(true);
+                      setAddError(null);
+                    }}
+                    className="flex h-8 items-center gap-1 rounded-lg bg-blue-500/20 px-2.5 text-xs font-semibold text-blue-700 hover:bg-blue-500/30 transition dark:text-blue-300"
+                  >
+                    <Plus size={12} />
+                    Add Branch Admin
+                  </button>
+                )}
               </div>
 
               {branchAdmins.length === 0 ? (
@@ -532,7 +674,6 @@ export default function TeamDataPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      setAddUserType("member");
                       setNewRole("individual_agent");
                       setShowAdd(true);
                       setAddError(null);
@@ -613,7 +754,6 @@ export default function TeamDataPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      setAddUserType("member");
                       setNewRole("employee");
                       setShowAdd(true);
                       setAddError(null);
@@ -668,7 +808,7 @@ export default function TeamDataPage() {
               )}
             </div>
           </div>
-        ) : (
+        ) : activeTab === "tree" ? (
           /* ─── HIERARCHY TREE VIEW ───────────────────────────────── */
           <div className="glass-card p-6 animate-fade-up">
             <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2">
@@ -722,6 +862,127 @@ export default function TeamDataPage() {
                 ))}
               </div>
             )}
+          </div>
+        ) : (
+          /* ─── WORKSPACE & BRANCHES VIEW ─────────────────────────── */
+          <div className="grid gap-6 md:grid-cols-2">
+            {/* Workspace Profile Card */}
+            <div className="glass-card p-6 animate-fade-up">
+              <h2 className="text-base font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+                <Building2 size={18} className="text-brand-500" />
+                Workspace Details
+              </h2>
+              {orgError && (
+                <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300">
+                  {orgError}
+                </div>
+              )}
+              {orgDetails ? (
+                <div className="space-y-4 text-sm">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                      Organization ID
+                    </label>
+                    <p className="text-xs font-mono bg-slate-100 dark:bg-white/5 rounded-lg px-2.5 py-1.5 text-slate-600 dark:text-slate-400 break-all select-all">
+                      {orgDetails.id}
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                      Company Name
+                    </label>
+                    {isAuthorized ? (
+                      <input
+                        value={editOrgName}
+                        onChange={(e) => setEditOrgName(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 bg-white dark:border-white/10 dark:bg-black/20 px-3 py-2 text-sm outline-none focus:border-brand-400 dark:text-white"
+                        placeholder="My Organization"
+                      />
+                    ) : (
+                      <p className="font-semibold text-slate-900 dark:text-white">{orgDetails.company_name}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                      Business Industry Module
+                    </label>
+                    {isAuthorized ? (
+                      <select
+                        value={editOrgType}
+                        onChange={(e) => setEditOrgType(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 bg-white dark:border-white/10 dark:bg-black/20 px-3 py-2 text-sm outline-none focus:border-brand-400 dark:text-white"
+                      >
+                        <option value="">Select industry type</option>
+                        {INDUSTRIES.map((ind) => (
+                          <option key={ind.code} value={ind.code}>
+                            {ind.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <p className="font-semibold text-slate-900 dark:text-white">{orgDetails.organization_type_name || "None / General"}</p>
+                    )}
+                  </div>
+                  {isAuthorized && (
+                    <button
+                      type="button"
+                      onClick={() => void handleUpdateOrg()}
+                      disabled={savingOrg}
+                      className="flex items-center justify-center gap-1.5 rounded-xl bg-brand-500 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-brand-600 disabled:opacity-60"
+                    >
+                      {savingOrg ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle size={12} />}
+                      Save Workspace Details
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="flex justify-center items-center py-10 text-slate-500">
+                  <Loader2 size={20} className="animate-spin text-brand-500" />
+                </div>
+              )}
+            </div>
+
+            {/* Branch Locations Card */}
+            <div className="glass-card p-6 animate-fade-up" style={{ animationDelay: "50ms" }}>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <MapPin size={18} className="text-brand-500" />
+                  Branch Locations
+                </h2>
+                {isAuthorized && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddBranch(true);
+                      setBranchError(null);
+                    }}
+                    className="flex h-8 items-center gap-1 rounded-lg bg-brand-500/20 px-2.5 text-xs font-semibold text-brand-700 hover:bg-brand-500/30 transition dark:text-brand-300"
+                  >
+                    <Plus size={12} />
+                    Add Branch
+                  </button>
+                )}
+              </div>
+              <div className="space-y-3 max-h-[40vh] overflow-y-auto pr-1">
+                {branches.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 px-4 py-8 text-center text-xs text-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-slate-400">
+                    No branch locations registered. All operations are at Headquarters.
+                  </div>
+                ) : (
+                  branches.map((b) => (
+                    <div key={b.id} className="flex items-center gap-3 rounded-2xl border border-slate-150 bg-white dark:border-white/10 dark:bg-white/5 p-4 shadow-sm">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-brand-500/10 text-brand-600 dark:text-brand-400 shrink-0">
+                        <MapPin size={14} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-sm text-slate-900 dark:text-white truncate">{b.name}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{b.location || "No Location Specified"}</p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
           </div>
         )}
 
@@ -779,7 +1040,8 @@ export default function TeamDataPage() {
                       <select
                         value={editRole}
                         onChange={(e) => setEditRole(e.target.value)}
-                        className="w-full rounded-xl border border-slate-200 bg-white dark:border-white/15 dark:bg-slate-950/50 px-3 py-2 text-xs outline-none focus:border-brand-400 dark:text-white"
+                        className="w-full rounded-xl border border-slate-200 bg-white dark:border-white/15 dark:bg-slate-950/50 px-3 py-2 text-xs outline-none focus:border-brand-400 dark:text-white disabled:opacity-60"
+                        disabled={currentUser?.id === selectedUser.id}
                       >
                         {ROLE_PRESETS.map((preset) => (
                           <option key={preset.code} value={preset.code}>
@@ -836,6 +1098,21 @@ export default function TeamDataPage() {
                       {savingUser ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle size={12} />}
                       {savingUser ? "Saving changes..." : "Save Role & Hierarchy"}
                     </button>
+
+                    {/* Delete Team Member Option */}
+                    {currentUser && currentUser.id !== selectedUser.id && (
+                      <div className="pt-3 border-t border-rose-500/10 mt-3">
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteUser(selectedUser.id)}
+                          disabled={savingUser}
+                          className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 px-4 py-2 text-xs font-semibold text-rose-700 dark:text-rose-400 transition disabled:opacity-60"
+                        >
+                          <Trash2 size={12} />
+                          Delete Team Member
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -873,7 +1150,7 @@ export default function TeamDataPage() {
             <div className="w-full max-w-md rounded-2xl border border-white/20 bg-white/95 dark:bg-slate-900/95 shadow-2xl backdrop-blur-2xl p-6 animate-fade-up">
               <div className="mb-5 flex items-center justify-between">
                 <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-                  {addUserType === "admin" ? "Add Administrator" : "Add Team Member"}
+                  Add {newRole === "super_admin" ? "Super Admin" : newRole === "branch_admin" ? "Branch Admin" : newRole === "individual_agent" ? "Agent" : "Staff Member"}
                 </h2>
                 <button onClick={() => setShowAdd(false)} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10">
                   <X size={16} />
@@ -919,35 +1196,6 @@ export default function TeamDataPage() {
                   />
                 </label>
 
-                {addUserType === "member" && (
-                  <label className="block">
-                    <span className="mb-1 block text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Role</span>
-                    <div className="grid grid-cols-2 gap-2">
-                      {ROLE_PRESETS.filter(r => r.code !== "super_admin").map((role) => (
-                        <button
-                          key={role.code}
-                          type="button"
-                          onClick={() => setNewRole(role.code)}
-                          className={`rounded-xl px-3 py-2 text-xs font-semibold capitalize transition ${
-                            newRole === role.code
-                              ? "bg-brand-500 text-white"
-                              : "border border-slate-200 bg-slate-50/50 text-slate-600 hover:bg-slate-100 dark:border-white/10 dark:bg-white/5 dark:text-slate-300"
-                          }`}
-                        >
-                          {role.label}
-                        </button>
-                      ))}
-                    </div>
-                  </label>
-                )}
-
-                {addUserType === "admin" && (
-                  <div className="rounded-xl border border-purple-200/30 bg-purple-50/30 dark:border-purple-500/20 dark:bg-purple-500/5 px-3 py-2.5 text-xs text-purple-700 dark:text-purple-300">
-                    <p className="font-semibold mb-1">Administrator</p>
-                    <p>This user will have full access to all permissions and can manage other administrators and team members.</p>
-                  </div>
-                )}
-
                 <button
                   type="button"
                   onClick={() => void handleAddUser()}
@@ -955,7 +1203,62 @@ export default function TeamDataPage() {
                   className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-600 disabled:opacity-60"
                 >
                   {adding ? <Loader2 size={15} className="animate-spin" /> : <UserPlus size={15} />}
-                  {adding ? "Creating..." : `Add ${addUserType === "admin" ? "Admin" : "Member"}`}
+                  {adding ? "Creating..." : `Add ${newRole === "super_admin" ? "Super Admin" : newRole === "branch_admin" ? "Branch Admin" : newRole === "individual_agent" ? "Agent" : "Staff Member"}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ─── Add Branch Modal ───────────────────────────────────── */}
+        {showAddBranch && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 backdrop-blur-sm p-4">
+            <div className="w-full max-w-md rounded-2xl border border-white/20 bg-white/95 dark:bg-slate-900/95 shadow-2xl backdrop-blur-2xl p-6 animate-fade-up">
+              <div className="mb-5 flex items-center justify-between">
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                  Add Branch Location
+                </h2>
+                <button onClick={() => setShowAddBranch(false)} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10">
+                  <X size={16} />
+                </button>
+              </div>
+
+              {branchError && (
+                <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300">
+                  {branchError}
+                </div>
+              )}
+
+              <div className="space-y-3">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Branch Name</span>
+                  <input
+                    value={newBranchName}
+                    onChange={(e) => setNewBranchName(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-white dark:border-white/10 dark:bg-black/20 dark:text-white px-3 py-2.5 text-sm outline-none focus:border-brand-400"
+                    placeholder="e.g. Dhaka Branch"
+                    required
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="mb-1 block text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Location (Optional)</span>
+                  <input
+                    value={newBranchLocation}
+                    onChange={(e) => setNewBranchLocation(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-white dark:border-white/10 dark:bg-black/20 dark:text-white px-3 py-2.5 text-sm outline-none focus:border-brand-400"
+                    placeholder="e.g. Road 12, Banani, Dhaka"
+                  />
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => void handleAddBranch()}
+                  disabled={addingBranch}
+                  className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-600 disabled:opacity-60"
+                >
+                  {addingBranch ? <Loader2 size={15} className="animate-spin" /> : <MapPin size={15} />}
+                  {addingBranch ? "Creating..." : "Add Branch"}
                 </button>
               </div>
             </div>

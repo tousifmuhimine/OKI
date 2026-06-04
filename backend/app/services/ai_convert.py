@@ -25,18 +25,19 @@ INDUSTRY_SLUGS = {
 }
 
 
-async def convert_notes_to_lead(raw_notes: str, api_key: str) -> Optional[LeadCreate]:
+async def convert_notes_to_lead(raw_notes: str, api_key: str, industry_code: Optional[str] = None) -> Optional[LeadCreate]:
     """
     Convert raw agent notes into a structured Lead object using Groq API.
 
     Implements the "Direct-Entry" prompt template:
-      1. Identifies the industry.
+      1. Identifies/enforces the industry.
       2. Extracts name, email, phone_number.
       3. Extracts industry-specific fields into `industry_data`.
 
     Args:
         raw_notes: Raw text notes from agent/customer interactions
         api_key: The organization-specific Groq API key
+        industry_code: The industry code of the organization to lock the lead to
 
     Returns:
         LeadCreate schema with extracted fields (including industry_data), or None if extraction fails.
@@ -44,9 +45,29 @@ async def convert_notes_to_lead(raw_notes: str, api_key: str) -> Optional[LeadCr
     if not api_key:
         return None
 
+    if industry_code:
+        industry_target = industry_code
+        industry_instruction = f"1. The target industry for this lead is strictly '{industry_code}'."
+        if industry_code == "real_estate":
+            industry_data_instruction = '3. Extract industry-specific fields into "industry_data": { "company_name": ..., "budget": <number|null>, "square_feet": <number|null> }'
+        elif industry_code == "study_abroad":
+            industry_data_instruction = '3. Extract industry-specific fields into "industry_data": { "preferred_country": <"UK"|"US"|"AUS"|"CA"|null>, "financial_status": <string|null> }'
+        elif industry_code == "ecommerce":
+            industry_data_instruction = '3. Extract industry-specific fields into "industry_data": { "product_interest": <string|null>, "delivery_location": <string|null>, "urgency_level": <"Low"|"Medium"|"High"|null>, "preferred_platform": <"Messenger"|"WhatsApp"|null> }'
+        else:
+            industry_data_instruction = '3. Extract industry-specific fields into "industry_data": {}'
+    else:
+        industry_target = "real_estate|study_abroad|ecommerce|agro|manufacture|null"
+        industry_instruction = "1. Identify the industry. It must be one of: real_estate, study_abroad, ecommerce, agro, manufacture. If not clearly identifiable, use null."
+        industry_data_instruction = """3. Extract industry-specific fields into "industry_data":
+   - If Real Estate: { "company_name": ..., "budget": <number|null>, "square_feet": <number|null> }
+   - If Study Abroad: { "preferred_country": <"UK"|"US"|"AUS"|"CA"|null>, "financial_status": <string|null> }
+   - If Ecommerce: { "product_interest": <string|null>, "delivery_location": <string|null>, "urgency_level": <"Low"|"Medium"|"High"|null>, "preferred_platform": <"Messenger"|"WhatsApp"|null> }
+   - Otherwise: {}"""
+
     prompt = f"""Act as a professional CRM data officer in Bangladesh. Analyze the note: '{raw_notes}'.
 
-1. Identify the industry. It must be one of: real_estate, study_abroad, ecommerce, agro, manufacture. If not clearly identifiable, use null.
+{industry_instruction}
 2. Extract:
    - company_name (string, required — use contact name if no company)
    - contact_person (string, optional)
@@ -56,11 +77,7 @@ async def convert_notes_to_lead(raw_notes: str, api_key: str) -> Optional[LeadCr
    - address (string, optional)
    - source (string, optional — one of: manual, website, outbound, referral. Default: manual)
    - notes (string, optional — cleaned summary)
-3. Extract industry-specific fields into "industry_data":
-   - If Real Estate: {{ "company_name": ..., "budget": <number|null>, "square_feet": <number|null> }}
-   - If Study Abroad: {{ "preferred_country": <"UK"|"US"|"AUS"|"CA"|null>, "financial_status": <string|null> }}
-   - If Ecommerce: {{ "product_interest": <string|null>, "delivery_location": <string|null>, "urgency_level": <"Low"|"Medium"|"High"|null>, "preferred_platform": <"Messenger"|"WhatsApp"|null> }}
-   - Otherwise: {{}}
+{industry_data_instruction}
 
 Return a single clean JSON object ready for Supabase insertion, with NO markdown, NO code fences, just raw JSON:
 {{
@@ -70,7 +87,7 @@ Return a single clean JSON object ready for Supabase insertion, with NO markdown
   "email": "...",
   "phone": "...",
   "address": "...",
-  "industry": "real_estate|study_abroad|ecommerce|agro|manufacture|null",
+  "industry": "{industry_target}",
   "source": "manual",
   "notes": "...",
   "industry_data": {{ ... }}
@@ -121,6 +138,7 @@ Return a single clean JSON object ready for Supabase insertion, with NO markdown
             if not company_name:
                 return None
 
+            resolved_industry = industry_code or extracted_data.get("industry")
             industry_data = extracted_data.get("industry_data") or {}
 
             return LeadCreate(
@@ -129,7 +147,7 @@ Return a single clean JSON object ready for Supabase insertion, with NO markdown
                 phone=extracted_data.get("phone"),
                 email=extracted_data.get("email"),
                 address=extracted_data.get("address"),
-                industry=extracted_data.get("industry"),
+                industry=resolved_industry,
                 notes=extracted_data.get("notes") or raw_notes,
                 source=extracted_data.get("source", "manual"),
                 status="new",

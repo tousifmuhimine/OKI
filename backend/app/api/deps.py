@@ -103,8 +103,6 @@ async def get_current_auth(
             )
 
         org_id = payload.get("org_id")
-        if not org_id and settings.allow_anon_dev and settings.debug:
-            org_id = "dev-org"
 
         # Query local database user details
         from app.db.models import User, Role
@@ -123,7 +121,7 @@ async def get_current_auth(
             if role_code in ("authenticated", "anon"):
                 role_code = "super_admin"
             
-            role_codes = ["super_admin", "admin", "branch_admin", "individual_agent", "employee"]
+            role_codes = ["super_admin", "branch_admin", "individual_agent", "employee"]
             for rc in role_codes:
                 exists = (await session.execute(select(Role).where(Role.code == rc))).scalar_one_or_none()
                 if not exists:
@@ -141,6 +139,16 @@ async def get_current_auth(
                 import uuid
                 resolved_org_id = str(uuid.uuid4())
                 
+            user_meta = payload.get("user_metadata", {})
+            meta_company_name = user_meta.get("company_name")
+            meta_org_type_code = user_meta.get("org_type_code")
+            await _ensure_organization_initialized(
+                session,
+                resolved_org_id,
+                company_name=meta_company_name,
+                org_type_code=meta_org_type_code
+            )
+
             local_user = User(
                 id=user_id,
                 organization_id=resolved_org_id,

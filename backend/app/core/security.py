@@ -57,5 +57,6 @@ async def verify_supabase_token(token: str) -> dict:
         "email": user.get("email"),
         "role": user.get("user_metadata", {}).get("role") or user.get("app_metadata", {}).get("role") or "authenticated",
         "custom_role": user.get("user_metadata", {}).get("role") or user.get("app_metadata", {}).get("role") or "authenticated",
-        "org_id": user.get("user_metadata", {}).get("org_id") or user.get("app_metadata", {}).get("org_id")
+        "org_id": user.get("user_metadata", {}).get("org_id") or user.get("app_metadata", {}).get("org_id"),
+        "user_metadata": user.get("user_metadata", {})
     }

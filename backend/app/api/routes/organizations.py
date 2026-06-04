@@ -27,13 +27,14 @@ async def _backfill_org_data(session: AsyncSession, org_id: str) -> None:
     from app.db.models import Lead, Customer, Opportunity, SalesOrder, Inbox, Contact, Conversation, Message, Task, LeadActivity, LeadStage
     from sqlalchemy import update, select
 
-    # Backfill organization_id
-    models_to_update = [Lead, Customer, Opportunity, SalesOrder, Inbox, Contact, Conversation, Message, Task, LeadActivity]
-    for model in models_to_update:
-        if hasattr(model, "organization_id"):
-            await session.execute(
-                update(model).where(model.organization_id.is_(None)).values(organization_id=org_id)
-            )
+    # Backfill organization_id (only for the dev-org to avoid claiming other data)
+    if org_id == "dev-org":
+        models_to_update = [Lead, Customer, Opportunity, SalesOrder, Inbox, Contact, Conversation, Message, Task, LeadActivity]
+        for model in models_to_update:
+            if hasattr(model, "organization_id"):
+                await session.execute(
+                    update(model).where(model.organization_id.is_(None)).values(organization_id=org_id)
+                )
 
     # Resolve first stage for this organization to backfill unassigned leads
     first_stage = (await session.execute(
@@ -234,7 +235,7 @@ async def create_branch(
 ) -> BranchOut:
     if not auth.org_id:
         raise HTTPException(status_code=403, detail="Organization not identified")
-    if auth.role != "super_admin" and auth.role != "admin":
+    if auth.role != "super_admin":
         raise HTTPException(status_code=403, detail="Only admins can create branches")
 
     from app.db.models import Branch
@@ -380,8 +381,8 @@ async def update_org_user(
     if not auth.org_id:
         raise HTTPException(status_code=403, detail="Organization not identified")
     
-    # Only super_admin or admin can update users in their organization
-    if auth.role not in ("super_admin", "admin"):
+    # Only super_admin can update users in their organization
+    if auth.role != "super_admin":
         raise HTTPException(status_code=403, detail="Only admins can update user profiles")
         
     from app.db.models import User, Role, Task, Lead, PermissionGrant
@@ -469,5 +470,58 @@ async def update_org_user(
         task_count=task_count,
         lead_count=lead_count
     )
+
+
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_organization_user(
+    user_id: str,
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> None:
+    if not auth.org_id:
+        raise HTTPException(status_code=403, detail="Organization not identified")
+    
+    # Only super_admin can delete users (no admin role exists anymore)
+    if auth.role != "super_admin":
+        raise HTTPException(status_code=403, detail="Only the super admin can delete team members")
+        
+    if user_id == auth.user_id:
+        raise HTTPException(status_code=400, detail="Super admin cannot delete themselves")
+        
+    from app.db.models import User, PermissionGrant
+    from sqlalchemy import select, delete
+    
+    # Find user in the organization
+    stmt = select(User).where(User.id == user_id, User.organization_id == auth.org_id)
+    res = await session.execute(stmt)
+    user = res.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found in organization")
+        
+    # Delete from Supabase auth first
+    from app.core.config import settings
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.delete(
+                f"{settings.supabase_url.rstrip('/')}/auth/v1/admin/users/{user_id}",
+                headers={
+                    "apikey": settings.supabase_service_role_key,
+                    "Authorization": f"Bearer {settings.supabase_service_role_key}",
+                },
+            )
+            # If user does not exist in Supabase (e.g. deleted/mocked), we continue
+            if resp.status_code not in (200, 404):
+                print(f"Supabase auth delete returned status {resp.status_code}: {resp.text}")
+    except Exception as exc:
+        print(f"Failed to delete user from Supabase auth: {exc}")
+        
+    # Delete user's PermissionGrant rows
+    await session.execute(delete(PermissionGrant).where(PermissionGrant.user_id == user_id))
+    
+    # Delete local User row
+    await session.delete(user)
+    await session.commit()
+
 
 

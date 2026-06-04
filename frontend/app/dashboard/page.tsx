@@ -160,7 +160,7 @@ export default function DashboardPage() {
   const [now, setNow] = useState(new Date());
   const [activeTimezone, setActiveTimezone] = useState({ label: "Dhaka", tz: "Asia/Dhaka" });
   const [clockDropdownOpen, setClockDropdownOpen] = useState(false);
-  const adminView = userRole === "admin";
+  const adminView = userRole === "admin" || userRole === "super_admin";
   const topLeadSources = useMemo(() => {
     return Object.entries(data?.lead_source_breakdown ?? {})
       .sort((a, b) => b[1] - a[1])
@@ -177,7 +177,7 @@ export default function DashboardPage() {
       .slice(0, 5);
   }, [data]);
   const platformAnalytics = useMemo(() => data?.platform_analytics ?? [], [data]);
-  const showAssignedBuckets = Boolean(userRole && userRole !== "admin");
+  const showAssignedBuckets = Boolean(userRole && userRole !== "admin" && userRole !== "super_admin");
   const assignedLeadCounts = useMemo(() => {
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -261,7 +261,7 @@ export default function DashboardPage() {
       if (data.user) {
         let name = data.user.user_metadata?.name || data.user.email?.split('@')[0] || "Ji-ho";
         const role = data.user.user_metadata?.role || data.user.app_metadata?.role || "agent";
-        if (role === "admin") {
+        if (role === "admin" || role === "super_admin") {
           name += " sir";
         }
         setUserName(name);

@@ -86,7 +86,7 @@ def _ownership_condition(field, auth: AuthContext):
 
 
 async def _can_view_all_conversations(auth: AuthContext, session: AsyncSession) -> bool:
-    return auth.role == "admin" or await has_permission(session, auth.user_id, auth, "chat.manage")
+    return auth.role == "super_admin" or await has_permission(session, auth.user_id, auth, "chat.manage")
 
 
 async def _can_access_conversation(conversation: Conversation, auth: AuthContext, session: AsyncSession) -> bool:
@@ -250,7 +250,7 @@ async def get_conversation(
     session: AsyncSession = Depends(get_session_dep),
 ) -> ConversationOut:
     conversation = await _get_owned_conversation(conversation_id, auth, session)
-    if auth.role != "admin" and not await _can_access_conversation(conversation, auth, session):
+    if auth.role != "super_admin" and not await _can_access_conversation(conversation, auth, session):
         raise HTTPException(status_code=404, detail="Conversation not found")
     contact = await session.get(Contact, conversation.contact_id)
     inbox = await session.get(Inbox, conversation.inbox_id)
@@ -273,7 +273,7 @@ async def pause_conversation(
     session: AsyncSession = Depends(get_session_dep),
 ) -> ConversationOut:
     conversation = await _get_owned_conversation(conversation_id, auth, session)
-    if auth.role != "admin" and not await _can_access_conversation(conversation, auth, session):
+    if auth.role != "super_admin" and not await _can_access_conversation(conversation, auth, session):
         raise HTTPException(status_code=404, detail="Conversation not found")
     conversation.is_bot_paused = True
     if not conversation.assigned_user_id:
@@ -291,7 +291,7 @@ async def resume_conversation(
     session: AsyncSession = Depends(get_session_dep),
 ) -> ConversationOut:
     conversation = await _get_owned_conversation(conversation_id, auth, session)
-    if auth.role != "admin" and not await _can_access_conversation(conversation, auth, session):
+    if auth.role != "super_admin" and not await _can_access_conversation(conversation, auth, session):
         raise HTTPException(status_code=404, detail="Conversation not found")
     conversation.is_bot_paused = False
     await session.commit()
@@ -307,7 +307,7 @@ async def takeover_conversation(
     session: AsyncSession = Depends(get_session_dep),
 ) -> ConversationOut:
     conversation = await _get_owned_conversation(conversation_id, auth, session)
-    if auth.role != "admin" and not await _can_access_conversation(conversation, auth, session):
+    if auth.role != "super_admin" and not await _can_access_conversation(conversation, auth, session):
         raise HTTPException(status_code=404, detail="Conversation not found")
     conversation.is_bot_paused = True
     conversation.assigned_user_id = auth.user_id
@@ -326,7 +326,7 @@ async def list_messages(
     session: AsyncSession = Depends(get_session_dep),
 ) -> MessageListResponse:
     conversation = await _get_owned_conversation(conversation_id, auth, session)
-    if auth.role != "admin" and not await _can_access_conversation(conversation, auth, session):
+    if auth.role != "super_admin" and not await _can_access_conversation(conversation, auth, session):
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     query = (
@@ -359,7 +359,7 @@ async def create_message(
     session: AsyncSession = Depends(get_session_dep),
 ) -> MessageOut:
     conversation = await _get_owned_conversation(conversation_id, auth, session)
-    if auth.role != "admin" and not await _can_access_conversation(conversation, auth, session):
+    if auth.role != "super_admin" and not await _can_access_conversation(conversation, auth, session):
         raise HTTPException(status_code=404, detail="Conversation not found")
     inbox = await session.get(Inbox, conversation.inbox_id)
     contact = await session.get(Contact, conversation.contact_id)

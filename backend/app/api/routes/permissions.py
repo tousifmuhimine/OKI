@@ -28,7 +28,7 @@ async def list_my_permissions(
     return list(rows)
 
 ROLE_PERMISSION_PRESETS: dict[str, list[str]] = {
-    "admin": [
+    "super_admin": [
         "customers.manage",
         "leads.manage",
         "tasks.manage",
@@ -59,7 +59,7 @@ async def apply_permission_preset(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> PermissionPresetResponse:
-    if auth.role != "admin":
+    if auth.role != "super_admin":
         raise HTTPException(status_code=403, detail="Permission denied")
     permissions = ROLE_PERMISSION_PRESETS.get(payload.role.lower())
     if not permissions:
@@ -99,7 +99,7 @@ async def list_permission_grants(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> PermissionGrantListResponse:
-    if auth.role != "admin":
+    if auth.role != "super_admin":
         raise HTTPException(status_code=403, detail="Permission denied")
     query = select(PermissionGrant).where(PermissionGrant.workspace_id == auth.user_id)
     count_query = select(func.count(PermissionGrant.id)).where(PermissionGrant.workspace_id == auth.user_id)
@@ -124,7 +124,7 @@ async def create_permission_grant(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> PermissionGrantOut:
-    if auth.role != "admin":
+    if auth.role != "super_admin":
         raise HTTPException(status_code=403, detail="Permission denied")
     existing = (
         await session.execute(
@@ -161,7 +161,7 @@ async def update_permission_grant(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> PermissionGrantOut:
-    if auth.role != "admin":
+    if auth.role != "super_admin":
         raise HTTPException(status_code=403, detail="Permission denied")
     grant = await session.get(PermissionGrant, grant_id)
     if not grant or grant.workspace_id != auth.user_id:
@@ -178,7 +178,7 @@ async def delete_permission_grant(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> None:
-    if auth.role != "admin":
+    if auth.role != "super_admin":
         raise HTTPException(status_code=403, detail="Permission denied")
     grant = await session.get(PermissionGrant, grant_id)
     if not grant or grant.workspace_id != auth.user_id:

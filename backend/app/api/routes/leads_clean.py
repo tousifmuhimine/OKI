@@ -102,11 +102,11 @@ def _normalize_emails(emails: list[str] | None) -> list[str]:
 
 
 async def _can_view_all_leads(auth: AuthContext, session: AsyncSession) -> bool:
-    return auth.role == "admin" or await has_permission(session, auth.user_id, auth, "leads.manage")
+    return auth.role == "super_admin" or await has_permission(session, auth.user_id, auth, "leads.manage")
 
 
 async def _can_view_leads(auth: AuthContext, session: AsyncSession) -> bool:
-    return auth.role == "admin" or await has_permission(session, auth.user_id, auth, "leads.view") or await _can_view_all_leads(auth, session)
+    return auth.role == "super_admin" or await has_permission(session, auth.user_id, auth, "leads.view") or await _can_view_all_leads(auth, session)
 
 
 def _is_assigned_lead(lead: Lead, auth: AuthContext) -> bool:
@@ -134,7 +134,7 @@ async def list_leads(
 ) -> LeadListResponse:
     assigned_scope_requested = quick_filter == "assigned_to_me"
     assigned_user_lookup_requested = bool(assigned_user_id)
-    if assigned_user_lookup_requested and auth.role != "super_admin" and auth.role != "admin" and not await _can_view_all_leads(auth, session):
+    if assigned_user_lookup_requested and auth.role != "super_admin" and not await _can_view_all_leads(auth, session):
         raise HTTPException(status_code=403, detail="Permission denied")
     if not assigned_scope_requested and not await _can_view_leads(auth, session):
         raise HTTPException(status_code=403, detail="Permission denied")
@@ -317,7 +317,16 @@ async def ai_convert_notes(
             detail="Groq API Key not configured. Please add your key in Settings > AI & Automation.",
         )
 
-    result = await convert_notes_to_lead(payload.raw_notes, api_key)
+    org_type_code = None
+    if auth.org_id:
+        from app.db.models import Organization, OrganizationType
+        org = await session.get(Organization, auth.org_id)
+        if org and org.organization_type_id:
+            org_type = await session.get(OrganizationType, org.organization_type_id)
+            if org_type:
+                org_type_code = org_type.code
+
+    result = await convert_notes_to_lead(payload.raw_notes, api_key, org_type_code)
     if not result:
         raise HTTPException(
             status_code=400,
@@ -505,7 +514,7 @@ async def delete_lead(
     session: AsyncSession = Depends(get_session_dep),
 ) -> None:
     lead = await _get_lead_or_404(lead_id, session, auth)
-    if auth.role != "super_admin" and auth.role != "admin" and not await has_permission(session, auth.user_id, auth, "leads.manage"):
+    if auth.role != "super_admin" and not await has_permission(session, auth.user_id, auth, "leads.manage"):
         raise HTTPException(status_code=403, detail="Permission denied")
     await session.delete(lead)
     await session.commit()
@@ -612,7 +621,7 @@ async def create_lead_share_link(
     session: AsyncSession = Depends(get_session_dep),
 ) -> LeadShareOut:
     await _get_lead_or_404(lead_id, session, auth)
-    if auth.role != "super_admin" and auth.role != "admin" and not await _can_view_all_leads(auth, session):
+    if auth.role != "super_admin" and not await _can_view_all_leads(auth, session):
         raise HTTPException(status_code=403, detail="Permission denied")
     org = None
     if auth.org_id:
@@ -703,7 +712,7 @@ async def convert_lead(
     session: AsyncSession = Depends(get_session_dep),
 ):
     lead = await _get_lead_or_404(lead_id, session, auth)
-    if auth.role != "super_admin" and auth.role != "admin" and not await _can_view_all_leads(auth, session):
+    if auth.role != "super_admin" and not await _can_view_all_leads(auth, session):
         raise HTTPException(status_code=403, detail="Permission denied")
     if lead.converted_customer_id:
         customer = await session.get(Customer, lead.converted_customer_id)
@@ -907,7 +916,7 @@ async def bulk_upload_leads(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ):
-    if auth.role != "super_admin" and auth.role != "admin" and not await has_permission(session, auth.user_id, auth, "leads.manage"):
+    if auth.role != "super_admin" and not await has_permission(session, auth.user_id, auth, "leads.manage"):
         raise HTTPException(status_code=403, detail="Permission denied")
 
     content = await file.read()

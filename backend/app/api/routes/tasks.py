@@ -14,7 +14,7 @@ router = APIRouter()
 
 
 async def _can_view_tasks(auth: AuthContext, session: AsyncSession) -> bool:
-    return auth.role == "admin" or await has_permission(session, auth.user_id, auth, "tasks.manage")
+    return auth.role == "super_admin" or await has_permission(session, auth.user_id, auth, "tasks.manage")
 
 
 @router.get("", response_model=TaskListResponse)
@@ -43,7 +43,7 @@ async def list_tasks(
         filters.append(Task.created_at >= start_date)
     if end_date:
         filters.append(Task.created_at <= end_date)
-    if auth.role != "admin":
+    if auth.role != "super_admin":
         filters.append(Task.assigned_user_id == auth.user_id)
     elif assigned_user_id:
         filters.append(Task.assigned_user_id == assigned_user_id)
@@ -82,7 +82,7 @@ async def create_task(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> TaskOut:
-    if auth.role != "admin" and not await has_permission(session, auth.user_id, auth, "tasks.manage"):
+    if auth.role != "super_admin" and not await has_permission(session, auth.user_id, auth, "tasks.manage"):
         raise HTTPException(status_code=403, detail="Permission denied")
     task = Task(**payload.model_dump())
     if not task.assigned_user_id:
@@ -100,7 +100,7 @@ async def update_task(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> TaskOut:
-    if auth.role != "admin" and not await has_permission(session, auth.user_id, auth, "tasks.manage"):
+    if auth.role != "super_admin" and not await has_permission(session, auth.user_id, auth, "tasks.manage"):
         raise HTTPException(status_code=403, detail="Permission denied")
     task = await session.get(Task, task_id)
     if not task:
@@ -118,7 +118,7 @@ async def delete_task(
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ) -> None:
-    if auth.role != "admin" and not await has_permission(session, auth.user_id, auth, "tasks.manage"):
+    if auth.role != "super_admin" and not await has_permission(session, auth.user_id, auth, "tasks.manage"):
         raise HTTPException(status_code=403, detail="Permission denied")
     task = await session.get(Task, task_id)
     if not task:
