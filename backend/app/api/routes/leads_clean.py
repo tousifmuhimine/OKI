@@ -263,6 +263,12 @@ async def create_lead(
     assigned_user_ids = data.pop("assigned_user_ids", None)
     entity = Lead(**data)
 
+    if entity.assigned_user_id or entity.assigned_agent_id or assigned_user_ids:
+        from datetime import datetime, timezone, timedelta
+        entity.assigned_at = datetime.now(timezone.utc)
+        if entity.sla_duration_hours:
+            entity.target_stage_by = entity.assigned_at + timedelta(hours=entity.sla_duration_hours)
+
     session.add(entity)
     await session.flush()
 
@@ -455,8 +461,35 @@ async def update_lead(
 
     previous_status = lead.status
     assigned_user_ids = changes.pop("assigned_user_ids", None)
+
+    assignment_changed = False
+    if "assigned_user_id" in changes and changes["assigned_user_id"] != lead.assigned_user_id:
+        assignment_changed = True
+    if "assigned_agent_id" in changes and changes["assigned_agent_id"] != lead.assigned_agent_id:
+        assignment_changed = True
+    if assigned_user_ids is not None:
+        current_assigned_uids = set(await _populate_lead_assignments(lead, session))
+        if set(assigned_user_ids) != current_assigned_uids:
+            assignment_changed = True
+
     for key, value in changes.items():
         setattr(lead, key, value)
+
+    is_assigned = (lead.assigned_user_id or lead.assigned_agent_id or (assigned_user_ids if assigned_user_ids is not None else await _populate_lead_assignments(lead, session)))
+
+    if assignment_changed and is_assigned:
+        from datetime import datetime, timezone
+        lead.assigned_at = datetime.now(timezone.utc)
+
+    if not is_assigned:
+        lead.assigned_at = None
+        lead.target_stage_by = None
+    elif assignment_changed or "sla_duration_hours" in changes:
+        if lead.assigned_at and lead.sla_duration_hours:
+            from datetime import timedelta
+            lead.target_stage_by = lead.assigned_at + timedelta(hours=lead.sla_duration_hours)
+        else:
+            lead.target_stage_by = None
 
     if changes and "untouched" not in changes:
         lead.untouched = False

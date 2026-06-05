@@ -44,6 +44,10 @@ class LeadBase(BaseModel):
     branch_id: str | None = None
     last_education: str | None = None
     assigned_user_ids: list[str] | None = None
+    assigned_at: datetime | None = None
+    sla_duration_hours: int | None = None
+    target_stage_id: str | None = None
+    target_stage_by: datetime | None = None
 
     @field_validator("tags", mode="before")
     @classmethod
@@ -101,6 +105,10 @@ class LeadUpdate(BaseModel):
     branch_id: str | None = None
     last_education: str | None = None
     assigned_user_ids: list[str] | None = None
+    assigned_at: datetime | None = None
+    sla_duration_hours: int | None = None
+    target_stage_id: str | None = None
+    target_stage_by: datetime | None = None
 
 
 class LeadOut(LeadBase):

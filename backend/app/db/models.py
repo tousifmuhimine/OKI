@@ -128,6 +128,12 @@ class Lead(Base, TimestampMixin):
     untouched: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     ai_instructions: Mapped[str] = mapped_column(Text, nullable=True)
     tags: Mapped[dict] = mapped_column(JSONB, default=dict)
+    
+    # SLA & Timing constraints
+    assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    sla_duration_hours: Mapped[int] = mapped_column(Integer, nullable=True)
+    target_stage_id: Mapped[str] = mapped_column(String(36), ForeignKey("lead_stages.id", ondelete="SET NULL"), nullable=True, index=True)
+    target_stage_by: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class LeadSource(Base, TimestampMixin):

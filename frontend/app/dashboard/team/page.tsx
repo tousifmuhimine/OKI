@@ -448,7 +448,7 @@ export default function TeamDataPage() {
 
   // Determine if active user is an administrator
   const isAuthorized = useMemo(() => {
-    return currentUser?.role_code === "super_admin" || currentUser?.role_code === "admin";
+    return currentUser?.role_code === "super_admin" || currentUser?.role_code === "admin" || currentUser?.role_code === "branch_admin";
   }, [currentUser]);
 
   return (
@@ -535,7 +535,7 @@ export default function TeamDataPage() {
                     {admins.length}
                   </span>
                 </div>
-                {isAuthorized && (
+                {isAuthorized && currentUser?.role_code !== "branch_admin" && (
                   <button
                     type="button"
                     onClick={() => {
@@ -602,7 +602,7 @@ export default function TeamDataPage() {
                     {branchAdmins.length}
                   </span>
                 </div>
-                {isAuthorized && (
+                {isAuthorized && currentUser?.role_code !== "branch_admin" && (
                   <button
                     type="button"
                     onClick={() => {
@@ -949,7 +949,7 @@ export default function TeamDataPage() {
                   <MapPin size={18} className="text-brand-500" />
                   Branch Locations
                 </h2>
-                {isAuthorized && (
+                {isAuthorized && currentUser?.role_code !== "branch_admin" && (
                   <button
                     type="button"
                     onClick={() => {
@@ -1043,7 +1043,7 @@ export default function TeamDataPage() {
                         className="w-full rounded-xl border border-slate-200 bg-white dark:border-white/15 dark:bg-slate-950/50 px-3 py-2 text-xs outline-none focus:border-brand-400 dark:text-white disabled:opacity-60"
                         disabled={currentUser?.id === selectedUser.id}
                       >
-                        {ROLE_PRESETS.map((preset) => (
+                        {ROLE_PRESETS.filter(preset => currentUser?.role_code !== "branch_admin" || (preset.code !== "super_admin" && preset.code !== "branch_admin")).map((preset) => (
                           <option key={preset.code} value={preset.code}>
                             {preset.label}
                           </option>
@@ -1059,7 +1059,8 @@ export default function TeamDataPage() {
                       <select
                         value={editBranchId}
                         onChange={(e) => setEditBranchId(e.target.value)}
-                        className="w-full rounded-xl border border-slate-200 bg-white dark:border-white/15 dark:bg-slate-950/50 px-3 py-2 text-xs outline-none focus:border-brand-400 dark:text-white"
+                        className="w-full rounded-xl border border-slate-200 bg-white dark:border-white/15 dark:bg-slate-950/50 px-3 py-2 text-xs outline-none focus:border-brand-400 dark:text-white disabled:opacity-60"
+                        disabled={currentUser?.role_code === "branch_admin"}
                       >
                         <option value="">All Branches / Corporate HQ</option>
                         {branches.map((b) => (

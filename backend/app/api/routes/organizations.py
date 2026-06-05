@@ -309,6 +309,13 @@ async def list_org_users(
     from app.db.models import User, Role, Task, Lead, PermissionGrant
     from sqlalchemy import select, func
     stmt = select(User, Role.code).outerjoin(Role, User.role_id == Role.id).where(User.organization_id == auth.org_id)
+    if auth.role == "branch_admin":
+        stmt = stmt.where(User.branch_id == auth.branch_id)
+    elif auth.role == "individual_agent":
+        stmt = stmt.where((User.reports_to_id == auth.user_id) | (User.id == auth.user_id))
+    elif auth.role == "employee":
+        stmt = stmt.where(User.id == auth.user_id)
+        
     res = await session.execute(stmt)
     
     rows = res.all()
@@ -381,8 +388,8 @@ async def update_org_user(
     if not auth.org_id:
         raise HTTPException(status_code=403, detail="Organization not identified")
     
-    # Only super_admin can update users in their organization
-    if auth.role != "super_admin":
+    # Only super_admin and branch_admin can update users in their organization
+    if auth.role not in ("super_admin", "branch_admin"):
         raise HTTPException(status_code=403, detail="Only admins can update user profiles")
         
     from app.db.models import User, Role, Task, Lead, PermissionGrant
@@ -394,6 +401,21 @@ async def update_org_user(
     user = res.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found in organization")
+
+    if auth.role == "branch_admin":
+        if user.branch_id != auth.branch_id:
+            raise HTTPException(status_code=403, detail="Access denied: target user is not in your branch")
+        # Check target user's role
+        target_role_stmt = select(Role.code).where(Role.id == user.role_id)
+        target_role = (await session.execute(target_role_stmt)).scalar_one_or_none()
+        if target_role in ("super_admin", "branch_admin"):
+            raise HTTPException(status_code=403, detail="Access denied: branch admins cannot modify super admins or other branch admins")
+            
+        if payload.role_code is not None and payload.role_code not in ("employee", "individual_agent"):
+            raise HTTPException(status_code=400, detail="Branch admins can only assign employee or individual_agent roles")
+            
+        if payload.branch_id is not None and payload.branch_id != auth.branch_id:
+            raise HTTPException(status_code=400, detail="Branch admins can only assign users to their own branch")
         
     if payload.name is not None:
         user.name = payload.name
@@ -481,14 +503,13 @@ async def delete_organization_user(
     if not auth.org_id:
         raise HTTPException(status_code=403, detail="Organization not identified")
     
-    # Only super_admin can delete users (no admin role exists anymore)
-    if auth.role != "super_admin":
-        raise HTTPException(status_code=403, detail="Only the super admin can delete team members")
+    if auth.role not in ("super_admin", "branch_admin"):
+        raise HTTPException(status_code=403, detail="Only admins can delete team members")
         
     if user_id == auth.user_id:
-        raise HTTPException(status_code=400, detail="Super admin cannot delete themselves")
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
         
-    from app.db.models import User, PermissionGrant
+    from app.db.models import User, PermissionGrant, Role
     from sqlalchemy import select, delete
     
     # Find user in the organization
@@ -497,6 +518,15 @@ async def delete_organization_user(
     user = res.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found in organization")
+
+    if auth.role == "branch_admin":
+        if user.branch_id != auth.branch_id:
+            raise HTTPException(status_code=403, detail="Access denied: target user is not in your branch")
+        # Check target user's role
+        target_role_stmt = select(Role.code).where(Role.id == user.role_id)
+        target_role = (await session.execute(target_role_stmt)).scalar_one_or_none()
+        if target_role in ("super_admin", "branch_admin"):
+            raise HTTPException(status_code=403, detail="Access denied: branch admins cannot delete super admins or other branch admins")
         
     # Delete from Supabase auth first
     from app.core.config import settings
