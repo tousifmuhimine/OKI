@@ -75,7 +75,7 @@ class CustomerOut(CustomerBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    last_contact_date: datetime | None
+    last_contact_date: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

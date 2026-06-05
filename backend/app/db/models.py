@@ -213,6 +213,7 @@ class Opportunity(Base, TimestampMixin):
     stage: Mapped[str] = mapped_column(String(64), default="clue", index=True)
     estimated_value: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
     currency: Mapped[str] = mapped_column(String(8), default="USD")
+    industry_data: Mapped[dict] = mapped_column(JSONB, nullable=True, default=None)
 
 
 class Product(Base, TimestampMixin):
