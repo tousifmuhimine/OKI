@@ -26,15 +26,6 @@ type OpportunityListResponse = {
   meta: { total: number; limit: number; offset: number };
 };
 
-// ─── Stage Config ────────────────────────────────────────────────
-const stages = [
-  { key: "discovery",    label: "Discovery",    tone: "bg-blue-500/15 text-blue-700 dark:text-blue-300 ring-blue-500/30" },
-  { key: "proposal",     label: "Proposal",     tone: "bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-amber-500/30" },
-  { key: "negotiation",  label: "Negotiation",  tone: "bg-purple-500/15 text-purple-700 dark:text-purple-300 ring-purple-500/30" },
-  { key: "won",          label: "Closed Won",   tone: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 ring-emerald-500/30" },
-  { key: "lost",         label: "Closed Lost",  tone: "bg-slate-500/15 text-slate-700 dark:text-slate-300 ring-slate-500/30" },
-];
-
 // ─── Currency ────────────────────────────────────────────────────
 const exchangeRates: Record<string, number> = {
   BDT: 1, USD: 0.0091, AED: 0.033, CNY: 0.066, EUR: 0.0083, GBP: 0.0071,
@@ -48,7 +39,28 @@ const currencyOptions = [
   { code: "GBP", label: "GBP - Pound" },
 ];
 
+// ─── Stage Config Tone Helper ────────────────────────────────────
+const getStageTone = (index: number, name: string) => {
+  const nameLower = name.toLowerCase();
+  if (nameLower.includes("won") || nameLower.includes("complete") || nameLower.includes("fly") || nameLower.includes("delivered") || nameLower.includes("finished")) {
+    return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 ring-emerald-500/30";
+  }
+  if (nameLower.includes("lost") || nameLower.includes("cancel") || nameLower.includes("return")) {
+    return "bg-slate-500/15 text-slate-700 dark:text-slate-300 ring-slate-500/30";
+  }
+  const tones = [
+    "bg-blue-500/15 text-blue-700 dark:text-blue-300 ring-blue-500/30",
+    "bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-amber-500/30",
+    "bg-purple-500/15 text-purple-700 dark:text-purple-300 ring-purple-500/30",
+    "bg-pink-500/15 text-pink-700 dark:text-pink-300 ring-pink-500/30",
+    "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 ring-cyan-500/30",
+    "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 ring-indigo-500/30",
+  ];
+  return tones[index % tones.length];
+};
+
 export default function PipelinePage() {
+  const [stages, setStages] = useState<{ key: string; label: string; tone: string }[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -62,7 +74,7 @@ export default function PipelinePage() {
   const [newTitle, setNewTitle] = useState("");
   const [newCustomerId, setNewCustomerId] = useState("");
   const [newValue, setNewValue] = useState("");
-  const [newStage, setNewStage] = useState("discovery");
+  const [newStage, setNewStage] = useState("");
   const [creating, setCreating] = useState(false);
 
   const formatCurrency = (bdtValue: number) => {
@@ -79,15 +91,34 @@ export default function PipelinePage() {
   const loadOpportunities = useCallback(async () => {
     setLoading(true);
     try {
+      const pipeRes = await apiRequest<{ id: string; name: string; stages: any[] }>("/opportunities/pipeline");
+      const mappedStages = pipeRes.stages.map((s, idx) => ({
+        key: s.name.toLowerCase().replace(/\s+/g, "_"),
+        label: s.name,
+        tone: getStageTone(idx, s.name),
+      }));
+      setStages(mappedStages);
+      if (mappedStages.length > 0 && !newStage) {
+        setNewStage(mappedStages[0].key);
+      }
+
       const res = await apiRequest<OpportunityListResponse>("/opportunities?limit=200&offset=0");
-      setOpportunities(res.data);
+      const mappedOpps = res.data.map(opp => {
+        const stageKey = opp.stage ? opp.stage.toLowerCase().replace(/\s+/g, "_") : "";
+        const matchedStage = mappedStages.find(s => s.key === stageKey || s.label.toLowerCase() === opp.stage.toLowerCase());
+        return {
+          ...opp,
+          stage: matchedStage ? matchedStage.key : (opp.stage || "discovery").toLowerCase().replace(/\s+/g, "_"),
+        };
+      });
+      setOpportunities(mappedOpps);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [newStage]);
 
   useEffect(() => { void loadOpportunities(); }, [loadOpportunities]);
 
@@ -106,17 +137,18 @@ export default function PipelinePage() {
     const opp = opportunities.find(o => o.id === id);
     if (!opp || opp.stage === stageKey) { setDraggedId(null); return; }
 
-    // Optimistic update
+    const targetStage = stages.find(s => s.key === stageKey);
+    const dbStageName = targetStage ? targetStage.label : stageKey;
+
     setOpportunities(prev => prev.map(o => o.id === id ? { ...o, stage: stageKey } : o));
     setDraggedId(null);
     setSaving(id);
     try {
       await apiRequest(`/opportunities/${id}`, {
         method: "PATCH",
-        body: JSON.stringify({ stage: stageKey }),
+        body: JSON.stringify({ stage: dbStageName }),
       });
     } catch {
-      // Revert on failure
       setOpportunities(prev => prev.map(o => o.id === id ? { ...o, stage: opp.stage } : o));
     } finally {
       setSaving(null);
@@ -128,19 +160,29 @@ export default function PipelinePage() {
     if (!newTitle.trim() || !newCustomerId.trim()) return;
     setCreating(true);
     try {
+      const activeStage = newStage || (stages[0]?.key ?? "discovery");
+      const targetStage = stages.find(s => s.key === activeStage);
+      const dbStageName = targetStage ? targetStage.label : activeStage;
+
       const created = await apiRequest<Opportunity>("/opportunities", {
         method: "POST",
         body: JSON.stringify({
           title: newTitle,
           customer_id: newCustomerId,
-          stage: newStage,
+          stage: dbStageName,
           estimated_value: parseFloat(newValue) || 0,
           currency: "BDT",
         }),
       });
-      setOpportunities(prev => [created, ...prev]);
+
+      const createdMapped = {
+        ...created,
+        stage: created.stage ? created.stage.toLowerCase().replace(/\s+/g, "_") : activeStage
+      };
+
+      setOpportunities(prev => [createdMapped, ...prev]);
       setShowNewDeal(false);
-      setNewTitle(""); setNewCustomerId(""); setNewValue(""); setNewStage("discovery");
+      setNewTitle(""); setNewCustomerId(""); setNewValue(""); setNewStage(stages[0]?.key ?? "");
     } catch (err) {
       setError((err as Error).message);
     } finally {

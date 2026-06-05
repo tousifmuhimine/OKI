@@ -37,6 +37,8 @@ class CustomerProfileUpdate(BaseModel):
     address: str | None = None
     country_region: str | None = None
     password: str | None = None
+    last_education: str | None = None
+    countries_applied: list[str] | None = None
 
 class AssignedAgentOut(BaseModel):
     name: str | None
@@ -73,6 +75,16 @@ async def get_current_customer(
     return customer
 
 
+async def populate_customer_type(customer: Customer, session: AsyncSession):
+    if customer and customer.organization_id:
+        from app.db.models import Organization, OrganizationType
+        org = await session.get(Organization, customer.organization_id)
+        if org and org.organization_type_id:
+            org_type = await session.get(OrganizationType, org.organization_type_id)
+            if org_type:
+                customer.type = org_type.code
+
+
 @router.post("/login", response_model=CustomerLoginResponse)
 async def customer_login(
     payload: CustomerLoginPayload,
@@ -97,11 +109,16 @@ async def customer_login(
         raise HTTPException(status_code=400, detail="Invalid email or password")
 
     token = create_customer_token(customer.id)
+    await populate_customer_type(customer, session)
     return CustomerLoginResponse(token=token, customer=CustomerOut.model_validate(customer))
 
 
 @router.get("/me", response_model=CustomerOut)
-async def get_my_profile(customer: Customer = Depends(get_current_customer)) -> CustomerOut:
+async def get_my_profile(
+    customer: Customer = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session_dep),
+) -> CustomerOut:
+    await populate_customer_type(customer, session)
     return CustomerOut.model_validate(customer)
 
 
@@ -118,10 +135,33 @@ async def update_my_profile(
     
     for key, value in changes.items():
         setattr(customer, key, value)
+
+    # Sync to Lead if it exists
+    lead_res = await session.execute(select(Lead).where(Lead.converted_customer_id == customer.id))
+    lead = lead_res.scalars().first()
+    if lead:
+        if "company_name" in changes:
+            lead.company_name = changes["company_name"]
+        if "contact_person" in changes:
+            lead.contact_person = changes["contact_person"]
+        if "phone" in changes:
+            lead.phone = changes["phone"]
+        if "address" in changes:
+            lead.address = changes["address"]
+        if "last_education" in changes:
+            lead.last_education = changes["last_education"]
+        if "countries_applied" in changes:
+            if lead.industry_data is None:
+                lead.industry_data = {}
+            ind_data = dict(lead.industry_data)
+            ind_data["countries_applied"] = changes["countries_applied"]
+            lead.industry_data = ind_data
         
     await session.commit()
     await session.refresh(customer)
+    await populate_customer_type(customer, session)
     return CustomerOut.model_validate(customer)
+
 
 
 @router.get("/agent", response_model=AssignedAgentOut)

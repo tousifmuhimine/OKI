@@ -42,6 +42,8 @@ class CustomerBase(BaseModel):
     type: str | None = None
     branch_id: str | None = None
     assigned_user_ids: list[str] | None = None
+    last_education: str | None = None
+    countries_applied: list[str] | None = None
 
 
 class CustomerCreate(CustomerBase):
@@ -65,6 +67,8 @@ class CustomerUpdate(BaseModel):
     type: str | None = None
     branch_id: str | None = None
     assigned_user_ids: list[str] | None = None
+    last_education: str | None = None
+    countries_applied: list[str] | None = None
 
 
 class CustomerOut(CustomerBase):

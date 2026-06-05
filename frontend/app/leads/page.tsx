@@ -1071,6 +1071,7 @@ function LeadsContent() {
     if (agentFilter !== "all") params.set("assigned_user_id", agentFilter);
     if (startDate) params.set("start_date", apiDate(startDate));
     if (endDate) params.set("end_date", apiDate(endDate, true));
+    params.set("format", "excel");
     
     const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/api/v1";
     window.open(`${baseUrl}/leads/export?${params.toString()}`);
@@ -1480,8 +1481,8 @@ function LeadsContent() {
               Export
             </button>
             <label className="flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800 px-4 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer sm:h-10">
-              Import CSV
-              <input type="file" accept=".csv" onChange={handleBulkUpload} className="hidden" />
+              Import Excel/CSV
+              <input type="file" accept=".csv, .xlsx, .xls" onChange={handleBulkUpload} className="hidden" />
             </label>
             <button
               onClick={() => { setError(null); setCreateLeadOpen(true); }}
@@ -1948,6 +1949,40 @@ function LeadsContent() {
                             ))}
                           </div>
                         </div>
+                        <div className="col-span-2 mt-2">
+                          <label className="block text-left mb-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                            Communications Tracking
+                          </label>
+                          <div className="flex flex-wrap gap-4 rounded-xl border border-white/40 bg-white/30 p-3 dark:border-white/10 dark:bg-white/5">
+                            <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={!!industryData?.whatsapp_done}
+                                onChange={(e) => updateIndustryField("whatsapp_done", e.target.checked)}
+                                className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                              />
+                              WhatsApp Done
+                            </label>
+                            <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={!!industryData?.email_done}
+                                onChange={(e) => updateIndustryField("email_done", e.target.checked)}
+                                className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                              />
+                              Email Done
+                            </label>
+                            <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={!!industryData?.phone_done}
+                                onChange={(e) => updateIndustryField("phone_done", e.target.checked)}
+                                className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                              />
+                              Phone Call Done
+                            </label>
+                          </div>
+                        </div>
                       </>
                     )}
 
@@ -2054,27 +2089,31 @@ function LeadsContent() {
                 />
               </div>
               <div className={`flex w-full flex-wrap items-center gap-2 sm:w-auto`}>
-                <ThemedSelect
-                  value={branchFilter}
-                  onChange={setBranchFilter}
-                  icon={Building2}
-                  placeholder="-- Branch --"
-                  className="w-40 h-10"
-                  options={[
-                    { value: "all", label: "-- Branch --" },
-                    ...branches.map((b) => ({ value: b.id, label: b.name })),
-                  ]}
-                />
-                <select
-                  value={agentFilter}
-                  onChange={(e) => setAgentFilter(e.target.value)}
-                  className="h-10 rounded-xl border border-white/50 bg-white/50 px-3 text-xs font-semibold text-slate-700 outline-none dark:border-white/10 dark:bg-black/20 dark:text-slate-200"
-                >
-                  <option value="all">-- Agent --</option>
-                  {users.map((u) => (
-                    <option key={u.id} value={u.id}>{u.name || u.email || u.id}</option>
-                  ))}
-                </select>
+                {(currentUser?.role === "super_admin" || currentUser?.role === "admin") && (
+                  <ThemedSelect
+                    value={branchFilter}
+                    onChange={setBranchFilter}
+                    icon={Building2}
+                    placeholder="-- Branch --"
+                    className="w-40 h-10"
+                    options={[
+                      { value: "all", label: "-- Branch --" },
+                      ...branches.map((b) => ({ value: b.id, label: b.name })),
+                    ]}
+                  />
+                )}
+                {currentUser?.role !== "agent" && currentUser?.role !== "employee" && (
+                  <select
+                    value={agentFilter}
+                    onChange={(e) => setAgentFilter(e.target.value)}
+                    className="h-10 rounded-xl border border-white/50 bg-white/50 px-3 text-xs font-semibold text-slate-700 outline-none dark:border-white/10 dark:bg-black/20 dark:text-slate-200"
+                  >
+                    <option value="all">-- Agent --</option>
+                    {users.map((u) => (
+                      <option key={u.id} value={u.id}>{u.name || u.email || u.id}</option>
+                    ))}
+                  </select>
+                )}
                 <ThemedSelect 
                   value={statusFilter} 
                   onChange={setStatusFilter}
@@ -2335,16 +2374,29 @@ function LeadsContent() {
                                ? (lead.last_education || "—") 
                                : (configs.professions.find((p) => p.id === lead.lead_profession_id)?.name || "—")}
                           </td>
-                          <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">
-                             {configs.areas.find((area) => area.id === lead.lead_area_id)?.name || "—"}
+                          <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300 truncate max-w-[150px]" title={lead.address || configs.areas.find((area) => area.id === lead.lead_area_id)?.name || ""}>
+                             {lead.address || configs.areas.find((area) => area.id === lead.lead_area_id)?.name || "—"}
                           </td>
                           <td className="px-5 py-4">
                             <span className={`rounded-lg px-2.5 py-1 text-[11px] font-bold ${stageTone(configs.stages.find((item) => item.id === lead.lead_stage_id)?.name, lead.status)}`}>
                               {configs.stages.find((item) => item.id === lead.lead_stage_id)?.name ?? lead.status}
                             </span>
                           </td>
-                          <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">
-                            {users.find(u => u.id === lead.assigned_user_id)?.name || lead.assigned_user_id || "Unassigned"}
+                          <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300" onClick={(e) => e.stopPropagation()}>
+                            {(currentUser?.role === "admin" || currentUser?.role === "super_admin" || currentUser?.role === "branch_admin") ? (
+                              <select
+                                value={lead.assigned_user_id || ""}
+                                onChange={(e) => void updateLead(lead.id, { assigned_user_id: e.target.value || null })}
+                                className="bg-transparent border border-white/10 dark:border-white/5 hover:border-slate-300 dark:hover:border-slate-700 rounded px-1.5 py-0.5 text-xs text-slate-700 dark:text-slate-200 outline-none focus:border-brand-500 cursor-pointer"
+                              >
+                                <option value="" className="text-slate-900 bg-white dark:bg-slate-800 dark:text-white">Unassigned</option>
+                                {users.map((u) => (
+                                  <option key={u.id} value={u.id} className="text-slate-900 bg-white dark:bg-slate-800 dark:text-white">{u.name || u.email || u.id}</option>
+                                ))}
+                              </select>
+                            ) : (
+                              users.find(u => u.id === lead.assigned_user_id)?.name || lead.assigned_user_id || "Unassigned"
+                            )}
                           </td>
                           <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300 capitalize">
                             <div className="flex items-center gap-1.5">
@@ -2402,7 +2454,7 @@ function LeadsContent() {
                    <h3 className="flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-200">
                      <Smartphone size={16} /> Lead Details - {selectedLead.id.substring(0, 8).toUpperCase()}
                    </h3>
-                   <p className="mt-1 text-[10px] text-slate-500">Created by {users.find(u => u.id === selectedLead.assigned_user_id)?.name || "Super Admin"} | {formatDate(selectedLead.created_at)}</p>
+                   <p className="mt-1 text-[10px] text-slate-500">Source: {configs.sources.find(s => s.id === selectedLead.lead_source_id)?.name || selectedLead.source || "unsourced"} | {formatDate(selectedLead.created_at)}</p>
                  </div>
                  <button 
                   onClick={() => setSelectedId(null)}
@@ -2754,6 +2806,40 @@ function LeadsContent() {
                                 ))}
                               </div>
                             </div>
+                            <div className="col-span-2 mt-2">
+                              <label className="block text-left mb-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                                Communications Tracking
+                              </label>
+                              <div className="flex flex-wrap gap-4 rounded-xl border border-white/40 bg-white/30 p-3 dark:border-white/10 dark:bg-white/5">
+                                <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!editIndustryData?.whatsapp_done}
+                                    onChange={(e) => updateEditIndustryField("whatsapp_done", e.target.checked)}
+                                    className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                                  />
+                                  WhatsApp Done
+                                </label>
+                                <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!editIndustryData?.email_done}
+                                    onChange={(e) => updateEditIndustryField("email_done", e.target.checked)}
+                                    className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                                  />
+                                  Email Done
+                                </label>
+                                <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!editIndustryData?.phone_done}
+                                    onChange={(e) => updateEditIndustryField("phone_done", e.target.checked)}
+                                    className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                                  />
+                                  Phone Call Done
+                                </label>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       )}
@@ -2940,12 +3026,13 @@ function LeadsContent() {
                   const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/api/v1";
                   const params = new URLSearchParams();
                   selectedLeadIds.forEach((id) => params.append("lead_ids", id));
+                  params.set("format", "excel");
                   window.open(`${baseUrl}/leads/export?${params.toString()}`);
                 }}
                 className="flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
               >
                 <FileText size={14} />
-                <span>Export CSV</span>
+                <span>Export Excel</span>
               </button>
 
               <button

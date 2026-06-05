@@ -37,3 +37,19 @@ class OpportunityOut(BaseModel):
 class OpportunityListResponse(BaseModel):
     data: list[OpportunityOut]
     meta: PaginationMeta
+
+
+class PipelineStageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    position: int
+    is_closed: bool
+    probability_percent: int
+
+
+class PipelineOut(BaseModel):
+    id: str
+    name: str
+    stages: list[PipelineStageOut]

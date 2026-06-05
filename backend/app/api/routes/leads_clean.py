@@ -533,6 +533,32 @@ async def update_lead(
         source="lead_update",
     )
 
+    # Sync changes to Customer if converted
+    if lead.converted_customer_id:
+        customer_obj = await session.get(Customer, lead.converted_customer_id)
+        if customer_obj:
+            if "status" in changes or "lead_stage_id" in changes:
+                stage_name = lead.status
+                if lead.lead_stage_id:
+                    from app.db.models import LeadStage
+                    stage_ent = await session.get(LeadStage, lead.lead_stage_id)
+                    if stage_ent:
+                        stage_name = stage_ent.name
+                customer_obj.stage = stage_name
+            
+            if "company_name" in changes:
+                customer_obj.company_name = lead.company_name
+            if "contact_person" in changes:
+                customer_obj.contact_person = lead.contact_person
+            if "phone" in changes:
+                customer_obj.phone = lead.phone
+            if "address" in changes:
+                customer_obj.address = lead.address
+            if "last_education" in changes:
+                customer_obj.last_education = lead.last_education
+            if lead.industry_data and "countries_applied" in lead.industry_data:
+                customer_obj.countries_applied = lead.industry_data["countries_applied"]
+
     await session.commit()
     await session.refresh(lead)
     l_out = LeadOut.model_validate(lead)
@@ -752,13 +778,26 @@ async def convert_lead(
         if customer:
             return {"customer": CustomerOut.model_validate(customer).model_dump(), "invoice": None, "opportunity_id": None}
 
+    # Get stage name
+    stage_name = lead.status
+    if lead.lead_stage_id:
+        from app.db.models import LeadStage
+        stage_ent = await session.get(LeadStage, lead.lead_stage_id)
+        if stage_ent:
+            stage_name = stage_ent.name
+
     customer = Customer(
         company_name=lead.company_name,
         contact_person=lead.contact_person,
+        email=lead.email,
+        phone=lead.phone,
+        address=lead.address,
         assigned_user_id=lead.assigned_user_id or auth.user_id,
-        stage="new",
+        stage=stage_name,
         group_name=lead.source,
         tags={"lead_id": lead.id, "lead_source": lead.source},
+        last_education=lead.last_education,
+        countries_applied=lead.industry_data.get("countries_applied", []) if lead.industry_data else [],
         notes=f"Converted from lead {lead.id}. Source: {lead.source or 'unsourced' }.",
     )
     session.add(customer)
@@ -855,6 +894,7 @@ async def export_leads(
     branch_id: str | None = Query(default=None),
     quick_filter: str | None = Query(default=None),
     lead_ids: list[str] | None = Query(default=None),
+    format: str = Query(default="excel", pattern="^(csv|excel)$"),
     auth: AuthContext = Depends(get_current_auth),
     session: AsyncSession = Depends(get_session_dep),
 ):
@@ -913,6 +953,43 @@ async def export_leads(
 
     rows = (await session.execute(query)).scalars().all()
 
+    if format == "excel":
+        import openpyxl
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Leads"
+
+        headers = [
+            "Company Name", "Contact Person", "Phone", "Email", 
+            "Address", "Last Education", "Priority", "Status", "Source", "Notes"
+        ]
+        ws.append(headers)
+
+        for lead in rows:
+            ws.append([
+                lead.company_name or "",
+                lead.contact_person or "",
+                lead.phone or "",
+                lead.email or "",
+                lead.address or "",
+                lead.last_education or "",
+                lead.priority or "medium",
+                lead.status or "new",
+                lead.source or "",
+                lead.notes or ""
+            ])
+
+        out_buf = io.BytesIO()
+        wb.save(out_buf)
+        out_buf.seek(0)
+
+        return StreamingResponse(
+            out_buf,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=leads_export.xlsx"}
+        )
+
+    # Fallback to CSV
     output = io.StringIO()
     writer = csv.writer(output)
 
@@ -953,15 +1030,47 @@ async def bulk_upload_leads(
         raise HTTPException(status_code=403, detail="Permission denied")
 
     content = await file.read()
-    try:
-        csv_text = content.decode("utf-8")
-    except UnicodeDecodeError:
-        try:
-            csv_text = content.decode("latin1")
-        except Exception:
-            raise HTTPException(status_code=400, detail="Unable to decode file. Please upload a valid UTF-8 or Latin1 CSV file.")
+    is_excel = file.filename.endswith(".xlsx") or file.filename.endswith(".xls") or file.content_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-    reader = csv.DictReader(io.StringIO(csv_text))
+    if is_excel:
+        import openpyxl
+        try:
+            wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+            sheet = wb.active
+            rows_data = list(sheet.iter_rows(values_only=True))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Failed to parse Excel file: {str(exc)}")
+
+        if not rows_data or not rows_data[0]:
+            raise HTTPException(status_code=400, detail="Empty Excel file.")
+
+        raw_headers = [str(h).strip() if h is not None else "" for h in rows_data[0]]
+        rows_list = []
+        for r in rows_data[1:]:
+            row_dict = {}
+            for idx, val in enumerate(r):
+                if idx < len(raw_headers):
+                    row_dict[raw_headers[idx]] = str(val).strip() if val is not None else ""
+            rows_list.append(row_dict)
+
+        class ExcelReader:
+            def __init__(self, fieldnames, rows):
+                self.fieldnames = fieldnames
+                self.rows = rows
+            def __iter__(self):
+                return iter(self.rows)
+
+        reader = ExcelReader(raw_headers, rows_list)
+    else:
+        try:
+            csv_text = content.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                csv_text = content.decode("latin1")
+            except Exception:
+                raise HTTPException(status_code=400, detail="Unable to decode file. Please upload a valid UTF-8, Latin1 CSV, or Excel file.")
+
+        reader = csv.DictReader(io.StringIO(csv_text))
     if not reader.fieldnames:
         raise HTTPException(status_code=400, detail="Empty CSV headers.")
 

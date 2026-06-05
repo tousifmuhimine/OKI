@@ -43,6 +43,8 @@ class Customer(Base, TimestampMixin):
     tags: Mapped[list[str]] = mapped_column(JSONB, default=list)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=True)
     notes: Mapped[str] = mapped_column(Text, nullable=True)
+    last_education: Mapped[str] = mapped_column(String(255), nullable=True)
+    countries_applied: Mapped[list[str]] = mapped_column(JSONB, default=list)
 
 
 class LeadShareLink(Base, TimestampMixin):

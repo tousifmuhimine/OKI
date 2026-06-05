@@ -33,6 +33,9 @@ type Customer = {
   stage: string;
   group_name: string | null;
   tags: string[];
+  type?: string | null;
+  last_education?: string | null;
+  countries_applied?: string[] | null;
 };
 
 type Counselor = {
@@ -78,6 +81,9 @@ export default function CustomerPortalDashboard() {
   const [password, setPassword] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileSuccess, setProfileSuccess] = useState(false);
+  const [lastEducation, setLastEducation] = useState("");
+  const [countriesApplied, setCountriesApplied] = useState<string[]>([]);
+  const [newCountry, setNewCountry] = useState("");
 
   // File upload states
   const [uploadType, setUploadType] = useState("passport");
@@ -85,6 +91,16 @@ export default function CustomerPortalDashboard() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState(false);
+
+  const addCountry = () => {
+    if (newCountry.trim() && !countriesApplied.includes(newCountry.trim())) {
+      setCountriesApplied([...countriesApplied, newCountry.trim()]);
+      setNewCountry("");
+    }
+  };
+  const removeCountry = (c: string) => {
+    setCountriesApplied(countriesApplied.filter(item => item !== c));
+  };
 
   const getCustomerToken = () => {
     if (typeof window !== "undefined") {
@@ -128,7 +144,7 @@ export default function CustomerPortalDashboard() {
     try {
       setLoading(true);
       const [profileData, agentData, timelineData, docsData] = await Promise.all([
-        customerApiRequest<Customer>("/customer-portal/me"),
+        customerApiRequest<any>("/customer-portal/me"),
         customerApiRequest<Counselor>("/customer-portal/agent").catch(() => ({ name: "Assigned Counselor", email: "support@oki.crm", role: "Counselor" })),
         customerApiRequest<TimelineItem[]>("/customer-portal/timeline"),
         customerApiRequest<Document[]>("/customer-portal/documents")
@@ -140,6 +156,8 @@ export default function CustomerPortalDashboard() {
       setPhone(profileData.phone || "");
       setAddress(profileData.address || "");
       setCountryRegion(profileData.country_region || "");
+      setLastEducation(profileData.last_education || "");
+      setCountriesApplied(profileData.countries_applied || []);
 
       setCounselor(agentData);
       setTimeline(timelineData);
@@ -179,17 +197,21 @@ export default function CustomerPortalDashboard() {
         phone: phone,
         address: address,
         country_region: countryRegion,
+        last_education: lastEducation,
+        countries_applied: countriesApplied,
       };
       if (password) {
         payload.password = password;
       }
 
-      const updated = await customerApiRequest<Customer>("/customer-portal/me", {
+      const updated = await customerApiRequest<any>("/customer-portal/me", {
         method: "PATCH",
         body: JSON.stringify(payload),
       });
 
       setCustomer(updated);
+      setLastEducation(updated.last_education || "");
+      setCountriesApplied(updated.countries_applied || []);
       setPassword("");
       setProfileSuccess(true);
       setTimeout(() => setProfileSuccess(false), 3000);
@@ -305,6 +327,74 @@ export default function CustomerPortalDashboard() {
           </div>
         </div>
 
+        {/* Progress Stepper */}
+        {(() => {
+          const getIndustryStages = (type: string | null) => {
+            if (type === "study_abroad") {
+              return [
+                "Discovery", "Registration", "Document Submitted", "Document Approved",
+                "Offer Letter Applied", "Offer Letter Received", "Interview Scheduled",
+                "Interview Pass", "Medical Done", "Ticket & Fly"
+              ];
+            } else if (type === "vendors_interior") {
+              return [
+                "Discovery", "Requirements Taken", "Proposal", "Negotiation", "Working", "Finished"
+              ];
+            } else if (type === "ecommerce") {
+              return [
+                "New Order", "Confirmed", "Packed", "Shipped", "Delivered"
+              ];
+            } else {
+              return [
+                "Inquiry", "Site Visit", "Follow Up", "Negotiation", "Booking", "Payment", "Registration"
+              ];
+            }
+          };
+
+          const stagesList = getIndustryStages(customer?.type || null);
+          const currentStageName = customer?.stage || "";
+          const activeIndex = stagesList.findIndex(s => s.toLowerCase() === currentStageName.toLowerCase());
+          
+          return (
+            <div className="mb-8 p-6 rounded-3xl border border-white/5 bg-white/5 shadow-xl backdrop-blur-2xl">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-6">Application Progress</h3>
+              
+              <div className="flex flex-col md:flex-row items-center justify-between gap-4 md:gap-2 overflow-x-auto pb-4 pt-2 hide-scrollbar">
+                {stagesList.map((stage, idx) => {
+                  const isCompleted = idx < activeIndex;
+                  const isActive = idx === activeIndex;
+                  
+                  return (
+                    <div key={stage} className="flex-1 flex flex-col items-center min-w-[100px] relative text-center">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center border text-xs font-bold z-10 transition-all ${
+                        isCompleted ? "bg-emerald-500 border-emerald-400 text-white shadow-lg shadow-emerald-500/20" :
+                        isActive ? "bg-indigo-500 border-indigo-400 text-white animate-pulse shadow-lg shadow-indigo-500/30" :
+                        "bg-slate-900 border-white/10 text-slate-500"
+                      }`}>
+                        {isCompleted ? "✓" : idx + 1}
+                      </div>
+                      
+                      <span className={`mt-2 text-[10px] font-bold tracking-wide uppercase max-w-[90px] ${
+                        isActive ? "text-indigo-400 font-extrabold" :
+                        isCompleted ? "text-emerald-400" :
+                        "text-slate-500"
+                      }`}>
+                        {stage}
+                      </span>
+                      
+                      {idx < stagesList.length - 1 && (
+                        <div className={`hidden md:block absolute left-[calc(50%+16px)] top-4 w-[calc(100%-32px)] h-0.5 -z-0 ${
+                          idx < activeIndex ? "bg-emerald-500" : "bg-white/5"
+                        }`} />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
+
         {error && (
           <div className="mb-8 flex items-start gap-3 p-4 rounded-2xl border border-rose-500/20 bg-rose-500/10 text-rose-300 text-sm">
             <ShieldAlert size={18} className="shrink-0 mt-0.5" />
@@ -385,15 +475,61 @@ export default function CustomerPortalDashboard() {
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 ml-1">Country/Region</label>
-                  <input
-                    type="text"
-                    value={countryRegion}
-                    onChange={(e) => setCountryRegion(e.target.value)}
-                    className="w-full h-10 px-3.5 rounded-xl border border-white/5 bg-white/5 text-xs text-slate-200 outline-none focus:border-indigo-500/40"
-                  />
-                </div>
+                {customer?.type === "study_abroad" ? (
+                  <>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 ml-1">Last Education</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Bachelor of Science"
+                        value={lastEducation}
+                        onChange={(e) => setLastEducation(e.target.value)}
+                        className="w-full h-10 px-3.5 rounded-xl border border-white/5 bg-white/5 text-xs text-slate-200 outline-none focus:border-indigo-500/40"
+                      />
+                    </div>
+                    
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 ml-1">Countries Applied For</label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="e.g. Canada"
+                          value={newCountry}
+                          onChange={(e) => setNewCountry(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCountry(); } }}
+                          className="flex-1 h-10 px-3.5 rounded-xl border border-white/5 bg-white/5 text-xs text-slate-200 outline-none focus:border-indigo-500/40"
+                        />
+                        <button
+                          type="button"
+                          onClick={addCountry}
+                          className="h-10 px-4 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-xs font-bold text-white transition-all shrink-0"
+                        >
+                          Add
+                        </button>
+                      </div>
+                      {countriesApplied.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {countriesApplied.map(c => (
+                            <span key={c} className="flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                              {c}
+                              <button type="button" onClick={() => removeCountry(c)} className="hover:text-rose-400 font-bold ml-1 transition-colors">×</button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 ml-1">Country/Region</label>
+                    <input
+                      type="text"
+                      value={countryRegion}
+                      onChange={(e) => setCountryRegion(e.target.value)}
+                      className="w-full h-10 px-3.5 rounded-xl border border-white/5 bg-white/5 text-xs text-slate-200 outline-none focus:border-indigo-500/40"
+                    />
+                  </div>
+                )}
 
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 ml-1">Address</label>
@@ -524,8 +660,9 @@ export default function CustomerPortalDashboard() {
                     <option value="passport">Passport</option>
                     <option value="nid">National ID (NID)</option>
                     <option value="ielts">IELTS / English Score Card</option>
+                    <option value="hsc">HSC Certificate</option>
                     <option value="medical">Medical Report</option>
-                    <option value="certificates">Academic Certificates</option>
+                    <option value="certificates">Academic Certificates / Certificates</option>
                     <option value="other">Other Supporting File</option>
                   </select>
                 </div>
