@@ -787,6 +787,8 @@ async def convert_lead(
             stage_name = stage_ent.name
 
     customer = Customer(
+        organization_id=lead.organization_id,
+        branch_id=lead.branch_id,
         company_name=lead.company_name,
         contact_person=lead.contact_person,
         email=lead.email,
@@ -805,10 +807,29 @@ async def convert_lead(
 
     budget = payload.budget or 0
 
+    # Determine first stage of active pipeline for organization
+    from app.db.models import Pipeline, PipelineStage
+    pipe_res = await session.execute(
+        select(Pipeline).where(Pipeline.organization_id == lead.organization_id, Pipeline.is_active == True)
+    )
+    pipeline = pipe_res.scalars().first()
+    first_stage_name = "discovery" # default fallback
+    if pipeline:
+        stage_res = await session.execute(
+            select(PipelineStage)
+            .where(PipelineStage.pipeline_id == pipeline.id)
+            .order_by(PipelineStage.position.asc())
+        )
+        first_stage = stage_res.scalars().first()
+        if first_stage:
+            first_stage_name = first_stage.name
+
     opportunity = Opportunity(
+        organization_id=lead.organization_id,
+        branch_id=lead.branch_id,
         customer_id=customer.id,
         title=f"Opportunity for {customer.company_name or customer.contact_person or 'Customer'}",
-        stage="discovery",
+        stage=first_stage_name,
         estimated_value=budget,
         currency="BDT",
     )
@@ -816,6 +837,8 @@ async def convert_lead(
     await session.flush()
 
     sales_order = SalesOrder(
+        organization_id=lead.organization_id,
+        branch_id=lead.branch_id,
         customer_id=customer.id,
         handler_user_id=customer.assigned_user_id,
         status="draft",
@@ -828,6 +851,8 @@ async def convert_lead(
     await session.flush()
 
     task = Task(
+        organization_id=lead.organization_id,
+        branch_id=lead.branch_id,
         entity_type="opportunity",
         entity_id=opportunity.id,
         assigned_user_id=customer.assigned_user_id,

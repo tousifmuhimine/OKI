@@ -12,6 +12,7 @@ class OpportunityCreate(BaseModel):
     stage: str = "discovery"
     estimated_value: Decimal = Decimal("0.00")
     currency: str = "BDT"
+    industry_data: dict | None = None
 
 
 class OpportunityUpdate(BaseModel):
@@ -19,6 +20,7 @@ class OpportunityUpdate(BaseModel):
     stage: str | None = None
     estimated_value: Decimal | None = None
     currency: str | None = None
+    industry_data: dict | None = None
 
 
 class OpportunityOut(BaseModel):
@@ -32,6 +34,7 @@ class OpportunityOut(BaseModel):
     currency: str
     created_at: datetime
     updated_at: datetime
+    industry_data: dict | None = None
 
 
 class OpportunityListResponse(BaseModel):
