@@ -2,15 +2,11 @@
 
 import Link from "next/link";
 import { FormEvent, useState, useEffect } from "react";
-import { Lock, LogIn, Mail, Sparkles } from "lucide-react";
+import { Lock, LogIn, Mail } from "lucide-react";
 
 import {
-  DEMO_EMAIL,
-  DEMO_PASSWORD,
   clearDemoSession,
-  isDemoCredentials,
   markBrowserAuthSession,
-  startDemoSession,
 } from "@/lib/demo-auth";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 
@@ -34,12 +30,6 @@ export default function AuthLoginPage() {
     window.location.assign("/dashboard");
   }
 
-  function handleDemoLogin() {
-    setError(null);
-    startDemoSession();
-    goToDashboard();
-  }
-
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
@@ -47,15 +37,9 @@ export default function AuthLoginPage() {
 
     const normalizedEmail = email.trim();
 
-    if (isDemoCredentials(normalizedEmail, password)) {
-      startDemoSession();
-      goToDashboard();
-      return;
-    }
-
     if (!isSupabaseConfigured()) {
       setLoading(false);
-      setError(`Use demo login: ${DEMO_EMAIL} / ${DEMO_PASSWORD}`);
+      setError("Supabase is not configured");
       return;
     }
 
@@ -92,14 +76,6 @@ export default function AuthLoginPage() {
         </div>
 
         <div className="glass-card p-7">
-          <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-white/30 bg-white/40 px-4 py-3 text-sm backdrop-blur-md dark:border-white/10 dark:bg-white/5">
-            <Sparkles size={13} className="mt-0.5 shrink-0 text-brand-600 dark:text-brand-400" />
-            <span className="text-slate-700 dark:text-slate-200">
-              Demo: <span className="font-semibold text-brand-700 dark:text-brand-300">{DEMO_EMAIL}</span> /{" "}
-              <span className="font-semibold text-brand-700 dark:text-brand-300">{DEMO_PASSWORD}</span>
-            </span>
-          </div>
-
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-widest text-slate-600 dark:text-slate-400" htmlFor="email">
@@ -146,11 +122,6 @@ export default function AuthLoginPage() {
             <button type="submit" disabled={loading} className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-indigo-600 py-2.5 font-semibold text-white shadow-glow-sm transition hover:from-brand-400 hover:to-indigo-500 disabled:cursor-not-allowed disabled:opacity-60">
               <LogIn size={15} />
               {loading ? "Signing in..." : "Sign in"}
-            </button>
-
-            <button type="button" onClick={handleDemoLogin} disabled={loading} className="flex w-full items-center justify-center gap-2 rounded-xl border border-brand-200 bg-white/60 py-2.5 font-semibold text-brand-700 transition hover:bg-white/80 disabled:cursor-not-allowed disabled:opacity-60 dark:border-brand-400/20 dark:bg-white/10 dark:text-brand-200 dark:hover:bg-white/15">
-              <Sparkles size={15} />
-              Continue with demo
             </button>
           </form>
 
