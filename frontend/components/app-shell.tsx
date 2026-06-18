@@ -353,6 +353,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <span>Settings</span>
             </Link>
           )}
+          {currentUser.role === "super_admin" && (
+            <Link href="/dashboard/admin/organizations" className={`flex flex-col items-center gap-1 rounded-xl py-2.5 text-[10px] transition ${
+              pathname?.startsWith("/dashboard/admin")
+                ? "bg-slate-900/8 text-slate-900 dark:bg-white/12 dark:text-white"
+                : "text-slate-500 dark:text-slate-400 hover:bg-white/40 dark:hover:bg-white/10 hover:text-slate-800 dark:hover:text-slate-300"
+            }`}>
+              <Building2 size={16} strokeWidth={1.6} />
+              <span className="text-center leading-tight">System Manager</span>
+            </Link>
+          )}
         </div>
       </aside>
 
@@ -451,8 +461,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <div
                 ref={accountMenuRef}
                 role="menu"
-                className="absolute right-0 top-full z-[120] mt-2 w-52 rounded-2xl border border-white/40 bg-white dark:border-white/20 dark:bg-slate-900 p-1 shadow-2xl backdrop-blur-2xl"
+                className="absolute right-0 top-full z-[120] mt-2 w-52 rounded-2xl border border-white/40 bg-white dark:border-white/20 dark:bg-slate-900 p-1.5 shadow-2xl backdrop-blur-2xl"
               >
+                {(currentUser.role === "admin" || currentUser.role === "super_admin") && (
+                  <div className="px-3 py-1.5 border-b border-slate-200/50 dark:border-white/10 mb-1.5 flex items-center justify-center">
+                    <span className="inline-flex items-center gap-1 rounded bg-rose-500/10 dark:bg-rose-500/20 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                      ADMIN ACCESS
+                    </span>
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={async () => {

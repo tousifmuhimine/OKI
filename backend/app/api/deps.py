@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status, Query
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -83,12 +83,14 @@ async def _ensure_organization_initialized(
 
 async def get_current_auth(
     token: str | None = Depends(oauth2_scheme),
+    access_token: str | None = Query(default=None, alias="access_token"),
     dev_workspace_id: str | None = Header(default=None, alias="X-Dev-Workspace-Id"),
     session: AsyncSession = Depends(get_db_session),
 ) -> AuthContext:
-    if token:
+    resolved_token = token or access_token
+    if resolved_token:
         try:
-            payload = await verify_supabase_token(token)
+            payload = await verify_supabase_token(resolved_token)
         except AuthError as exc:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -227,7 +229,7 @@ async def get_current_auth(
             branch_id=branch_id,
         )
 
-    if not token:
+    if not resolved_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing Bearer token",
@@ -312,3 +314,21 @@ def apply_tenant_filters(query, auth: AuthContext, model_class):
         query = query.where(*conditions)
         
     return query
+
+
+async def verify_crm_enabled(
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_db_session),
+) -> None:
+    if auth.role == "super_admin":
+        return
+    if not auth.org_id:
+        return
+        
+    from app.db.models import Organization
+    org = await session.get(Organization, auth.org_id)
+    if org and not org.crm_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="CRM access is disabled for your organization. Please verify your subscription status.",
+        )

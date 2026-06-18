@@ -8,6 +8,8 @@ from sqlalchemy import select
 
 from app.db.models import UserLLMConfig
 from app.inbox.llm_providers.groq import GroqProvider, DEFAULT_GROQ_MODEL
+from app.inbox.llm_providers.openai import OpenAIProvider
+from app.inbox.llm_providers.gemini import GeminiProvider
 from app.inbox.security import decrypt_channel_config
 
 logger = logging.getLogger(__name__)
@@ -110,8 +112,9 @@ async def generate_ai_reply(
     if not config:
         raise ValueError(f"No AI provider configured for user {user_id}. Please configure AI settings.")
     
-    if config.provider.lower() != "groq":
-        raise ValueError(f"AI provider '{config.provider}' not yet supported. Please use Groq.")
+    provider_name = config.provider.lower()
+    if provider_name not in ("groq", "openai", "gemini"):
+        raise ValueError(f"AI provider '{config.provider}' not yet supported. Please use Groq, OpenAI, or Gemini.")
     
     # Decrypt the API key
     try:
@@ -124,7 +127,16 @@ async def generate_ai_reply(
         raise ValueError("Failed to decrypt AI configuration")
     
     # Get the model to use
-    model = config.model_preferences.get("default") or config.default_model or DEFAULT_GROQ_MODEL
+    model = config.model_preferences.get("default") or config.default_model
+    if not model:
+        if provider_name == "groq":
+            model = DEFAULT_GROQ_MODEL
+        elif provider_name == "openai":
+            model = "gpt-4-turbo"
+        elif provider_name == "gemini":
+            model = "gemini-pro"
+        else:
+            model = "default"
     
     # Get the system prompt based on company type
     system_prompt = SYSTEM_PROMPTS.get(company_type) if company_type else DEFAULT_SYSTEM_PROMPT
@@ -132,16 +144,34 @@ async def generate_ai_reply(
     # Build the full prompt with progressive collection strategy
     full_prompt = f"{system_prompt}\n\nCustomer message: {message}\n\nRespond helpfully with a single question or statement:"
     
-    # Generate reply using Groq
+    # Generate reply using correct provider
     try:
-        provider = GroqProvider(api_key)
-        reply = await provider.generate(
-            model=model,
-            prompt=full_prompt,
-            max_tokens=256,
-        )
-        logger.info(f"[AI Reply] Generated for user={user_id}, company_type={company_type}")
+        if provider_name == "groq":
+            provider = GroqProvider(api_key)
+            reply = await provider.generate(
+                model=model,
+                prompt=full_prompt,
+                max_tokens=256,
+            )
+        elif provider_name == "openai":
+            provider = OpenAIProvider(api_key)
+            reply = await provider.generate(
+                model=model,
+                prompt=full_prompt,
+                max_tokens=256,
+            )
+        elif provider_name == "gemini":
+            provider = GeminiProvider(api_key)
+            reply = await provider.generate(
+                model=model,
+                prompt=full_prompt,
+                max_tokens=256,
+            )
+        else:
+            raise ValueError(f"Unsupported provider: {provider_name}")
+            
+        logger.info(f"[AI Reply] Generated using {provider_name} for user={user_id}, company_type={company_type}")
         return reply.strip()
     except Exception as e:
-        logger.error(f"Failed to generate AI reply: {e}")
+        logger.error(f"Failed to generate AI reply using {provider_name}: {e}")
         raise ValueError(f"Failed to generate reply: {str(e)}")

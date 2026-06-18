@@ -84,17 +84,24 @@ function getDaysInMonth(year: number, month: number) {
 // ─── Components ──────────────────────────────────────────────────
 function KpiTile({ label, value, trend, trendUp = true, icon: Icon, delay = "0ms" }: any) {
   return (
-    <div className="glass-card flex flex-col gap-3 p-5 animate-fade-up" style={{ animationDelay: delay }}>
+    <div 
+      className="glass-card flex flex-col gap-3.5 p-5 animate-fade-up hover:-translate-y-1 hover:shadow-glow hover:border-brand-400/30 dark:hover:border-brand-500/20 transition-all duration-300 ease-out group cursor-pointer relative overflow-hidden" 
+      style={{ animationDelay: delay }}
+    >
+      <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-transparent via-brand-400 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">{label}</span>
-        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10 text-brand-600 dark:bg-brand-500/20 dark:text-brand-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-          <Icon size={13} />
+        <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 group-hover:text-brand-500 dark:group-hover:text-brand-400 transition-colors duration-300">{label}</span>
+        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-brand-500/10 text-brand-600 dark:bg-brand-500/20 dark:text-brand-300 group-hover:bg-brand-500 group-hover:text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.2)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] transition-all duration-300">
+          <Icon size={14} className="group-hover:rotate-6 transition-transform duration-300" />
         </div>
       </div>
-      <p className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">{value}</p>
-      <div className="flex items-center gap-1">
-        <ArrowUpRight size={12} className={trendUp ? "text-emerald-500" : "text-rose-400 rotate-90"} />
-        <span className={`text-xs font-medium ${trendUp ? "text-emerald-500" : "text-rose-400"}`}>{trend}</span>
+      <p className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white group-hover:scale-[1.01] origin-left transition-transform duration-300">{value}</p>
+      <div className="flex items-center gap-1.5 mt-0.5">
+        <span className={`inline-flex items-center gap-0.5 rounded-lg px-2 py-0.5 text-xs font-semibold ${trendUp ? "bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400" : "bg-rose-500/10 text-rose-600 dark:bg-rose-500/20 dark:text-rose-400"}`}>
+          <ArrowUpRight size={11} className={trendUp ? "" : "rotate-90"} />
+          <span>{trend}</span>
+        </span>
+        <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500">vs last month</span>
       </div>
     </div>
   );

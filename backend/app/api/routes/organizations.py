@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -5,6 +6,7 @@ import httpx
 
 from app.api.deps import AuthContext, get_current_auth, get_session_dep
 from app.db.models import Organization
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -13,15 +15,45 @@ class OrganizationOut(BaseModel):
     company_name: str
     organization_type_code: str | None = None
     organization_type_name: str | None = None
+    
+    # Billing fields
+    plan_name: str
+    subscription_status: str
+    subscription_cycle: str
+    subscription_expires_at: datetime | None = None
+    
+    # Feature flags
+    chatbot_enabled: bool
+    crm_enabled: bool
+    lead_bulk_share_enabled: bool
+    
+    # Pending requests
+    requested_plan_name: str | None = None
+    requested_subscription_cycle: str | None = None
+    requested_at: datetime | None = None
 
 class OrganizationUpdate(BaseModel):
     company_name: str | None = None
     organization_type_code: str | None = None
 
+class PlanRequestPayload(BaseModel):
+    plan_name: str
+    subscription_cycle: str
+
+class OrganizationBillingUpdate(BaseModel):
+    plan_name: str | None = None
+    subscription_status: str | None = None
+    subscription_cycle: str | None = None
+    subscription_expires_at: datetime | None = None
+    chatbot_enabled: bool | None = None
+    crm_enabled: bool | None = None
+    lead_bulk_share_enabled: bool | None = None
+
 class OrganizationTypeOut(BaseModel):
     id: str
     name: str
     code: str
+
 
 async def _backfill_org_data(session: AsyncSession, org_id: str) -> None:
     from app.db.models import Lead, Customer, Opportunity, SalesOrder, Inbox, Contact, Conversation, Message, Task, LeadActivity, LeadStage
@@ -50,6 +82,34 @@ async def _backfill_org_data(session: AsyncSession, org_id: str) -> None:
             .values(lead_stage_id=first_stage.id, status=first_stage.name.lower().replace(" ", "_"))
         )
     await session.flush()
+
+
+async def _map_org_out(session: AsyncSession, org: Organization) -> OrganizationOut:
+    from app.db.models import OrganizationType
+    type_code = None
+    type_name = None
+    if org.organization_type_id:
+        org_type = await session.get(OrganizationType, org.organization_type_id)
+        if org_type:
+            type_code = org_type.code
+            type_name = org_type.name
+            
+    return OrganizationOut(
+        id=org.id,
+        company_name=org.company_name,
+        organization_type_code=type_code,
+        organization_type_name=type_name,
+        plan_name=org.plan_name or "free",
+        subscription_status=org.subscription_status or "active",
+        subscription_cycle=org.subscription_cycle or "monthly",
+        subscription_expires_at=org.subscription_expires_at,
+        chatbot_enabled=org.chatbot_enabled if org.chatbot_enabled is not None else True,
+        crm_enabled=org.crm_enabled if org.crm_enabled is not None else True,
+        lead_bulk_share_enabled=org.lead_bulk_share_enabled if org.lead_bulk_share_enabled is not None else True,
+        requested_plan_name=org.requested_plan_name,
+        requested_subscription_cycle=org.requested_subscription_cycle,
+        requested_at=org.requested_at,
+    )
 
 
 @router.get("/me", response_model=OrganizationOut)
@@ -98,20 +158,8 @@ async def get_my_organization(
         await session.commit()
         await session.refresh(org)
 
-    type_code = None
-    type_name = None
-    if org.organization_type_id:
-        org_type = await session.get(OrganizationType, org.organization_type_id)
-        if org_type:
-            type_code = org_type.code
-            type_name = org_type.name
+    return await _map_org_out(session, org)
 
-    return OrganizationOut(
-        id=org.id,
-        company_name=org.company_name,
-        organization_type_code=type_code,
-        organization_type_name=type_name,
-    )
 
 @router.patch("/me", response_model=OrganizationOut)
 async def update_my_organization(
@@ -145,20 +193,165 @@ async def update_my_organization(
     await session.commit()
     await session.refresh(org)
 
-    type_code = None
-    type_name = None
-    if org.organization_type_id:
-        org_type = await session.get(OrganizationType, org.organization_type_id)
-        if org_type:
-            type_code = org_type.code
-            type_name = org_type.name
+    return await _map_org_out(session, org)
 
-    return OrganizationOut(
-        id=org.id,
-        company_name=org.company_name,
-        organization_type_code=type_code,
-        organization_type_name=type_name,
-    )
+
+@router.get("/me/billing", response_model=OrganizationOut)
+async def get_my_billing(
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> OrganizationOut:
+    if not auth.org_id:
+        raise HTTPException(status_code=403, detail="Organization not identified")
+    org = await session.get(Organization, auth.org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return await _map_org_out(session, org)
+
+
+@router.post("/me/billing/request-plan", response_model=OrganizationOut)
+async def request_plan(
+    payload: PlanRequestPayload,
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> OrganizationOut:
+    if not auth.org_id:
+        raise HTTPException(status_code=403, detail="Organization not identified")
+    org = await session.get(Organization, auth.org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+        
+    org.requested_plan_name = payload.plan_name
+    org.requested_subscription_cycle = payload.subscription_cycle
+    org.requested_at = datetime.utcnow()
+    await session.commit()
+    await session.refresh(org)
+    return await _map_org_out(session, org)
+
+
+@router.get("/all", response_model=list[OrganizationOut])
+async def list_all_organizations(
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> list[OrganizationOut]:
+    if auth.role != "super_admin" or auth.org_id != settings.system_org_id:
+        raise HTTPException(status_code=403, detail="Only system administrators can list all organizations")
+    
+    from sqlalchemy import select
+    res = await session.execute(select(Organization).order_by(Organization.created_at.desc()))
+    orgs = res.scalars().all()
+    
+    out = []
+    for org in orgs:
+        out.append(await _map_org_out(session, org))
+    return out
+
+
+@router.post("/{org_id}/billing/approve", response_model=OrganizationOut)
+async def approve_billing_request(
+    org_id: str,
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> OrganizationOut:
+    if auth.role != "super_admin" or auth.org_id != settings.system_org_id:
+        raise HTTPException(status_code=403, detail="Only system administrators can approve plan requests")
+        
+    org = await session.get(Organization, org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+        
+    if not org.requested_plan_name:
+        raise HTTPException(status_code=400, detail="No pending plan upgrade request found for this organization")
+        
+    # Approve and transition
+    org.plan_name = org.requested_plan_name
+    org.subscription_cycle = org.requested_subscription_cycle or "monthly"
+    org.subscription_status = "active"
+    
+    # Expiry calculation
+    days = 30 if org.subscription_cycle == "monthly" else 365
+    org.subscription_expires_at = datetime.utcnow() + timedelta(days=days)
+    
+    # Auto adjust settings based on plans
+    if org.plan_name == "premium":
+        org.chatbot_enabled = True
+        org.crm_enabled = True
+        org.lead_bulk_share_enabled = True
+    elif org.plan_name == "basic":
+        org.chatbot_enabled = False
+        org.crm_enabled = True
+        org.lead_bulk_share_enabled = False
+    elif org.plan_name == "free":
+        org.chatbot_enabled = False
+        org.crm_enabled = True
+        org.lead_bulk_share_enabled = False
+        
+    # Clear request
+    org.requested_plan_name = None
+    org.requested_subscription_cycle = None
+    org.requested_at = None
+    
+    await session.commit()
+    await session.refresh(org)
+    return await _map_org_out(session, org)
+
+
+@router.post("/{org_id}/billing/reject", response_model=OrganizationOut)
+async def reject_billing_request(
+    org_id: str,
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> OrganizationOut:
+    if auth.role != "super_admin" or auth.org_id != settings.system_org_id:
+        raise HTTPException(status_code=403, detail="Only system administrators can reject plan requests")
+        
+    org = await session.get(Organization, org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+        
+    # Clear request
+    org.requested_plan_name = None
+    org.requested_subscription_cycle = None
+    org.requested_at = None
+    
+    await session.commit()
+    await session.refresh(org)
+    return await _map_org_out(session, org)
+
+
+@router.patch("/{org_id}/billing", response_model=OrganizationOut)
+async def admin_patch_billing(
+    org_id: str,
+    payload: OrganizationBillingUpdate,
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> OrganizationOut:
+    if auth.role != "super_admin" or auth.org_id != settings.system_org_id:
+        raise HTTPException(status_code=403, detail="Only system administrators can modify organization settings")
+        
+    org = await session.get(Organization, org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+        
+    if payload.plan_name is not None:
+        org.plan_name = payload.plan_name
+    if payload.subscription_status is not None:
+        org.subscription_status = payload.subscription_status
+    if payload.subscription_cycle is not None:
+        org.subscription_cycle = payload.subscription_cycle
+    if payload.subscription_expires_at is not None:
+        org.subscription_expires_at = payload.subscription_expires_at
+    if payload.chatbot_enabled is not None:
+        org.chatbot_enabled = payload.chatbot_enabled
+    if payload.crm_enabled is not None:
+        org.crm_enabled = payload.crm_enabled
+    if payload.lead_bulk_share_enabled is not None:
+        org.lead_bulk_share_enabled = payload.lead_bulk_share_enabled
+        
+    await session.commit()
+    await session.refresh(org)
+    return await _map_org_out(session, org)
+
 
 @router.get("/types", response_model=list[OrganizationTypeOut])
 async def list_organization_types(

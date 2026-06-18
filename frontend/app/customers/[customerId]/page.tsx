@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Building2, Globe, Mail, Phone, Save, Trash2, User, Users } from "lucide-react";
+import { ArrowLeft, Building2, Globe, Mail, Phone, Save, Trash2, User, Users, Clock, Sparkles, TrendingUp, UserPlus, Activity, ShieldAlert } from "lucide-react";
 
 import { ProtectedPage } from "@/components/protected-page";
 import { apiRequest } from "@/lib/api";
@@ -66,6 +66,58 @@ export default function CustomerProfilePage() {
   }, [customerId]);
 
   const latestLead = useMemo(() => profile?.related_leads?.[0] ?? null, [profile]);
+
+  const timelineEvents = useMemo(() => {
+    if (!profile) return [];
+    const events: {
+      id: string;
+      type: "created" | "preference" | "lead";
+      date: string;
+      title: string;
+      description: string;
+      badgeText?: string;
+      badgeStyle?: string;
+    }[] = [];
+
+    // 1. Customer Created
+    events.push({
+      id: `created-${profile.customer.id}`,
+      type: "created",
+      date: profile.customer.created_at,
+      title: "Customer Created",
+      description: `Customer record for ${profile.customer.company_name} was initialized in the database.`,
+      badgeText: "System",
+      badgeStyle: "bg-slate-500/10 text-slate-600 dark:bg-white/10 dark:text-slate-400 border border-slate-500/20",
+    });
+
+    // 2. Preferences
+    profile.preference_history.forEach((pref, index) => {
+      events.push({
+        id: `pref-${index}-${pref.detected_at}`,
+        type: "preference",
+        date: pref.detected_at,
+        title: `Preference: ${pref.field_name.replace(/_/g, " ")}`,
+        description: `Value detected as "${pref.new_value ?? "—"}" from ${pref.detected_from || "conversation"}.`,
+        badgeText: `AI (${Math.round((pref.confidence ?? 0) * 100)}%)`,
+        badgeStyle: "bg-purple-500/10 text-purple-600 dark:bg-purple-500/20 dark:text-purple-400 border border-purple-500/20",
+      });
+    });
+
+    // 3. Related Leads
+    profile.related_leads.forEach((lead) => {
+      events.push({
+        id: `lead-${lead.id}`,
+        type: "lead",
+        date: lead.updated_at,
+        title: `Lead Status Update`,
+        description: `Associated lead status updated to "${lead.status}" (Engagement: ${lead.engagement ?? "N/A"}). Summary: ${lead.last_summary || "None"}`,
+        badgeText: lead.source || "System",
+        badgeStyle: "bg-brand-500/10 text-brand-600 dark:bg-brand-500/20 dark:text-brand-400 border border-brand-500/20",
+      });
+    });
+
+    return events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [profile]);
 
   async function saveCustomer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -247,7 +299,7 @@ export default function CustomerProfilePage() {
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-widest text-brand-500 dark:text-brand-400">Intelligence</p>
-                    <h2 className="mt-1 text-lg font-semibold text-slate-900 dark:text-white">AI summary and preferences</h2>
+                    <h2 className="mt-1 text-lg font-semibold text-slate-900 dark:text-white">AI Insights</h2>
                   </div>
                   <span className="rounded-full bg-white/50 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/10 dark:text-slate-300">{profile.conversation_count} conversations</span>
                 </div>
@@ -260,54 +312,60 @@ export default function CustomerProfilePage() {
                     <div className="text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Trust level</div>
                     <p className="mt-1">{profile.trust_level ?? "Unknown"}</p>
                   </div>
-                  <div className="rounded-xl bg-white/40 p-3 dark:bg-black/20">
-                    <div className="text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Preference history</div>
-                    <div className="mt-2 space-y-2">
-                      {profile.preference_history.length === 0 ? (
-                        <p className="text-sm text-slate-500 dark:text-slate-400">No preference changes detected yet.</p>
-                      ) : profile.preference_history.slice(0, 4).map((item) => (
-                        <div key={`${item.field_name}-${item.detected_at}`} className="flex items-start justify-between gap-3 rounded-lg bg-white/50 px-3 py-2 dark:bg-white/5">
-                          <div>
-                            <p className="font-medium text-slate-800 dark:text-slate-100">{item.field_name.replace(/_/g, " ")}</p>
-                            <p className="text-xs text-slate-500 dark:text-slate-400">{item.detected_from ?? "message"}</p>
-                          </div>
-                          <span className="text-xs font-semibold text-brand-700 dark:text-brand-300">{item.new_value ?? "—"}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
                 </div>
               </div>
 
               <div className="glass-card rounded-2xl p-5 sm:p-6">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-widest text-brand-500 dark:text-brand-400">Lead History</p>
-                    <h2 className="mt-1 text-lg font-semibold text-slate-900 dark:text-white">Related converted leads</h2>
+                    <p className="text-xs font-semibold uppercase tracking-widest text-brand-500 dark:text-brand-400">Timeline</p>
+                    <h2 className="mt-1 text-lg font-semibold text-slate-900 dark:text-white">Activity History</h2>
                   </div>
-                  <span className="rounded-full bg-white/50 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/10 dark:text-slate-300">{profile.related_leads.length} records</span>
+                  <span className="rounded-full bg-white/50 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/10 dark:text-slate-300">{timelineEvents.length} events</span>
                 </div>
 
-                <div className="space-y-3">
-                  {profile.related_leads.length === 0 ? (
-                    <p className="text-sm text-slate-500 dark:text-slate-400">No converted leads found for this customer yet.</p>
-                  ) : profile.related_leads.map((lead) => (
-                    <div key={lead.id} className="rounded-xl border border-white/30 bg-white/50 p-4 dark:border-white/10 dark:bg-black/20">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="font-semibold text-slate-900 dark:text-white">{lead.company_name}</p>
-                          <p className="text-xs text-slate-500 dark:text-slate-400">{lead.source ?? "unsourced"} · {formatDate(lead.updated_at)}</p>
+                <div className="relative pl-6 border-l-2 border-slate-200 dark:border-white/10 space-y-6 max-h-[500px] overflow-y-auto pr-2 scrollbar-thin">
+                  {timelineEvents.length === 0 ? (
+                    <p className="text-sm text-slate-500 dark:text-slate-400">No activity logged yet.</p>
+                  ) : (
+                    timelineEvents.map((event) => {
+                      let EventIcon = Activity;
+                      let iconColor = "text-brand-500 bg-brand-500/10 border-brand-500/20";
+                      if (event.type === "created") {
+                        EventIcon = UserPlus;
+                        iconColor = "text-emerald-500 bg-emerald-500/10 border-emerald-500/20";
+                      } else if (event.type === "preference") {
+                        EventIcon = Sparkles;
+                        iconColor = "text-purple-500 bg-purple-500/10 border-purple-500/20";
+                      } else if (event.type === "lead") {
+                        EventIcon = TrendingUp;
+                        iconColor = "text-amber-500 bg-amber-500/10 border-amber-500/20";
+                      }
+
+                      return (
+                        <div key={event.id} className="relative group transition-all hover:translate-x-1 duration-200 text-left">
+                          {/* Timeline node icon */}
+                          <div className={`absolute -left-[35px] top-0.5 flex h-6 w-6 items-center justify-center rounded-full border bg-white dark:bg-slate-900 shadow-sm ${iconColor}`}>
+                            <EventIcon size={12} />
+                          </div>
+
+                          {/* Event Content */}
+                          <div>
+                            <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
+                              <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">{event.title}</h3>
+                              <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono font-medium">{formatDate(event.date)}</span>
+                            </div>
+                            <p className="mt-1 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">{event.description}</p>
+                            {event.badgeText && (
+                              <span className={`mt-1.5 inline-block rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${event.badgeStyle}`}>
+                                {event.badgeText}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${leadTone(lead)}`}>{lead.status}</span>
-                      </div>
-                      <div className="mt-3 grid gap-2 text-sm text-slate-600 dark:text-slate-300">
-                        <div>Intent: {lead.intent ?? "—"}</div>
-                        <div>Engagement: {lead.engagement ?? "—"}</div>
-                        <div>Trust level: {lead.trust_level ?? "—"}</div>
-                        <div>Summary: {lead.last_summary ?? "—"}</div>
-                      </div>
-                    </div>
-                  ))}
+                      );
+                    })
+                  )}
                 </div>
               </div>
             </div>

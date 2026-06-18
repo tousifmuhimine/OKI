@@ -28,6 +28,7 @@ from app.schemas.lead import (
     LeadShareOut,
     LeadUpdate,
     LeadTimelineItem,
+    LeadBulkShareCreate,
 )
 from app.core.config import settings
 from app.services.ai_convert import convert_notes_to_lead
@@ -418,6 +419,146 @@ async def check_phone_unique(
     return {"available": True, "existing_name": None}
 
 
+@router.get("/export")
+async def export_leads(
+    status_filter: str | None = Query(default=None, alias="status"),
+    stage_id: str | None = Query(default=None),
+    source_id: str | None = Query(default=None),
+    tag: str | None = Query(default=None),
+    priority: str | None = Query(default=None),
+    search: str | None = Query(default=None),
+    start_date: datetime | None = Query(default=None),
+    end_date: datetime | None = Query(default=None),
+    assigned_user_id: str | None = Query(default=None),
+    branch_id: str | None = Query(default=None),
+    quick_filter: str | None = Query(default=None),
+    lead_ids: list[str] | None = Query(default=None),
+    format: str = Query(default="excel", pattern="^(csv|excel)$"),
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+):
+    if not await _can_view_leads(auth, session):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    filters = []
+
+    if lead_ids:
+        filters.append(Lead.id.in_(lead_ids))
+
+    if status_filter and status_filter != "all":
+        filters.append(Lead.status == status_filter)
+    if branch_id:
+        filters.append(Lead.branch_id == branch_id)
+    if stage_id:
+        filters.append(Lead.lead_stage_id == stage_id)
+    if source_id:
+        filters.append(Lead.lead_source_id == source_id)
+    if tag:
+        tag_value = tag.strip().lower()
+        if tag_value:
+            filters.append(Lead.tags.contains([tag_value]))
+    if priority and priority != "all":
+        filters.append(Lead.priority == priority.lower())
+    if search:
+        needle = f"%{search.strip()}%"
+        filters.append(
+            or_(
+                Lead.company_name.ilike(needle),
+                Lead.contact_person.ilike(needle),
+                Lead.phone.ilike(needle),
+                Lead.email.ilike(needle),
+            )
+        )
+    if start_date:
+        filters.append(Lead.created_at >= start_date)
+    if end_date:
+        filters.append(Lead.created_at <= end_date)
+    if assigned_user_id:
+        filters.append(or_(Lead.assigned_user_id == assigned_user_id, Lead.assigned_agent_id == assigned_user_id))
+    if quick_filter == "assigned_to_me":
+        filters.append(or_(Lead.assigned_user_id == auth.user_id, Lead.assigned_agent_id == auth.user_id))
+    elif quick_filter == "untouched":
+        filters.append(Lead.untouched.is_(True))
+    elif quick_filter == "followups_due":
+        filters.append(and_(Lead.follow_up_date.is_not(None), Lead.follow_up_date <= func.now()))
+
+    query = select(Lead)
+    if filters:
+        query = query.where(*filters)
+
+    from app.api.deps import apply_tenant_filters
+    query = apply_tenant_filters(query, auth, Lead)
+    query = query.order_by(Lead.created_at.desc())
+
+    rows = (await session.execute(query)).scalars().all()
+
+    if format == "excel":
+        import openpyxl
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Leads"
+
+        headers = [
+            "Company Name", "Contact Person", "Phone", "Email", 
+            "Address", "Last Education", "Priority", "Status", "Source", "Notes"
+        ]
+        ws.append(headers)
+
+        for lead in rows:
+            ws.append([
+                lead.company_name or "",
+                lead.contact_person or "",
+                lead.phone or "",
+                lead.email or "",
+                lead.address or "",
+                lead.last_education or "",
+                lead.priority or "medium",
+                lead.status or "new",
+                lead.source or "",
+                lead.notes or ""
+            ])
+
+        out_buf = io.BytesIO()
+        wb.save(out_buf)
+        out_buf.seek(0)
+
+        return StreamingResponse(
+            out_buf,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=leads_export.xlsx"}
+        )
+
+    # Fallback to CSV
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow([
+        "Company Name", "Contact Person", "Phone", "Email", 
+        "Address", "Last Education", "Priority", "Status", "Source", "Notes"
+    ])
+
+    for lead in rows:
+        writer.writerow([
+            lead.company_name or "",
+            lead.contact_person or "",
+            lead.phone or "",
+            lead.email or "",
+            lead.address or "",
+            lead.last_education or "",
+            lead.priority or "medium",
+            lead.status or "new",
+            lead.source or "",
+            lead.notes or ""
+        ])
+
+    output.seek(0)
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode("utf-8")),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=leads_export.csv"}
+    )
+
+
 @router.get("/{lead_id}", response_model=LeadOut)
 async def get_lead(
     lead_id: str,
@@ -716,6 +857,7 @@ async def create_lead_share_link(
     return LeadShareOut(
         id=share.id,
         lead_id=share.lead_id,
+        lead_ids=share.lead_ids or [],
         token=share.token,
         share_url=share_url,
         is_public=share.is_public,
@@ -723,6 +865,74 @@ async def create_lead_share_link(
         expires_at=share.expires_at,
         created_at=share.created_at,
     )
+
+
+@router.post("/bulk-share-links", response_model=LeadShareOut, status_code=status.HTTP_201_CREATED)
+async def create_bulk_share_link(
+    payload: LeadBulkShareCreate,
+    auth: AuthContext = Depends(get_current_auth),
+    session: AsyncSession = Depends(get_session_dep),
+) -> LeadShareOut:
+    if not payload.lead_ids:
+        raise HTTPException(status_code=400, detail="At least one lead ID must be provided")
+
+    # Check permission
+    if auth.role != "super_admin" and not await _can_view_all_leads(auth, session):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    # Verify that all lead_ids exist and belong to the user's organization
+    for lead_id in payload.lead_ids:
+        lead = await session.get(Lead, lead_id)
+        if not lead or (auth.org_id and lead.organization_id != auth.org_id):
+            raise HTTPException(status_code=404, detail=f"Lead {lead_id} not found")
+
+    org = None
+    if auth.org_id:
+        org = await session.get(Organization, auth.org_id)
+
+    if org and not org.lead_bulk_share_enabled:
+        raise HTTPException(status_code=403, detail="Bulk lead sharing is disabled for your organization")
+
+    if payload.mode == "public" and org and not org.allow_public_shares:
+        raise HTTPException(status_code=403, detail="Public share links are disabled")
+
+    allowed_emails = _normalize_emails(payload.allowed_emails)
+    if payload.mode == "restricted" and not allowed_emails:
+        raise HTTPException(status_code=400, detail="Allowed emails are required for restricted sharing")
+
+    expires_at = None
+    if payload.expires_in_days:
+        expires_at = datetime.utcnow() + timedelta(days=payload.expires_in_days)
+    elif org and org.default_share_expiry_days:
+        expires_at = datetime.utcnow() + timedelta(days=org.default_share_expiry_days)
+
+    token = secrets.token_urlsafe(24)
+    share = LeadShareLink(
+        lead_id=payload.lead_ids[0],  # Keep first ID for foreign key constraint compatibility
+        lead_ids=payload.lead_ids,
+        created_by_user_id=auth.user_id,
+        token=token,
+        is_public=(payload.mode == "public"),
+        allowed_emails=allowed_emails,
+        expires_at=expires_at,
+    )
+    session.add(share)
+    await session.commit()
+    await session.refresh(share)
+
+    share_url = f"{settings.frontend_origin.rstrip('/')}/share/lead/{share.token}"
+    return LeadShareOut(
+        id=share.id,
+        lead_id=share.lead_id,
+        lead_ids=share.lead_ids or [],
+        token=share.token,
+        share_url=share_url,
+        is_public=share.is_public,
+        allowed_emails=share.allowed_emails or [],
+        expires_at=share.expires_at,
+        created_at=share.created_at,
+    )
+
 
 
 @router.patch("/{lead_id}/activities/{activity_id}", response_model=LeadActivityOut)
@@ -905,144 +1115,7 @@ async def convert_lead(
     }
 
 
-@router.get("/export")
-async def export_leads(
-    status_filter: str | None = Query(default=None, alias="status"),
-    stage_id: str | None = Query(default=None),
-    source_id: str | None = Query(default=None),
-    tag: str | None = Query(default=None),
-    priority: str | None = Query(default=None),
-    search: str | None = Query(default=None),
-    start_date: datetime | None = Query(default=None),
-    end_date: datetime | None = Query(default=None),
-    assigned_user_id: str | None = Query(default=None),
-    branch_id: str | None = Query(default=None),
-    quick_filter: str | None = Query(default=None),
-    lead_ids: list[str] | None = Query(default=None),
-    format: str = Query(default="excel", pattern="^(csv|excel)$"),
-    auth: AuthContext = Depends(get_current_auth),
-    session: AsyncSession = Depends(get_session_dep),
-):
-    if not await _can_view_leads(auth, session):
-        raise HTTPException(status_code=403, detail="Permission denied")
 
-    filters = []
-
-    if lead_ids:
-        filters.append(Lead.id.in_(lead_ids))
-
-    if status_filter and status_filter != "all":
-        filters.append(Lead.status == status_filter)
-    if branch_id:
-        filters.append(Lead.branch_id == branch_id)
-    if stage_id:
-        filters.append(Lead.lead_stage_id == stage_id)
-    if source_id:
-        filters.append(Lead.lead_source_id == source_id)
-    if tag:
-        tag_value = tag.strip().lower()
-        if tag_value:
-            filters.append(Lead.tags.contains([tag_value]))
-    if priority and priority != "all":
-        filters.append(Lead.priority == priority.lower())
-    if search:
-        needle = f"%{search.strip()}%"
-        filters.append(
-            or_(
-                Lead.company_name.ilike(needle),
-                Lead.contact_person.ilike(needle),
-                Lead.phone.ilike(needle),
-                Lead.email.ilike(needle),
-            )
-        )
-    if start_date:
-        filters.append(Lead.created_at >= start_date)
-    if end_date:
-        filters.append(Lead.created_at <= end_date)
-    if assigned_user_id:
-        filters.append(or_(Lead.assigned_user_id == assigned_user_id, Lead.assigned_agent_id == assigned_user_id))
-    if quick_filter == "assigned_to_me":
-        filters.append(or_(Lead.assigned_user_id == auth.user_id, Lead.assigned_agent_id == auth.user_id))
-    elif quick_filter == "untouched":
-        filters.append(Lead.untouched.is_(True))
-    elif quick_filter == "followups_due":
-        filters.append(and_(Lead.follow_up_date.is_not(None), Lead.follow_up_date <= func.now()))
-
-    query = select(Lead)
-    if filters:
-        query = query.where(*filters)
-
-    from app.api.deps import apply_tenant_filters
-    query = apply_tenant_filters(query, auth, Lead)
-    query = query.order_by(Lead.created_at.desc())
-
-    rows = (await session.execute(query)).scalars().all()
-
-    if format == "excel":
-        import openpyxl
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Leads"
-
-        headers = [
-            "Company Name", "Contact Person", "Phone", "Email", 
-            "Address", "Last Education", "Priority", "Status", "Source", "Notes"
-        ]
-        ws.append(headers)
-
-        for lead in rows:
-            ws.append([
-                lead.company_name or "",
-                lead.contact_person or "",
-                lead.phone or "",
-                lead.email or "",
-                lead.address or "",
-                lead.last_education or "",
-                lead.priority or "medium",
-                lead.status or "new",
-                lead.source or "",
-                lead.notes or ""
-            ])
-
-        out_buf = io.BytesIO()
-        wb.save(out_buf)
-        out_buf.seek(0)
-
-        return StreamingResponse(
-            out_buf,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=leads_export.xlsx"}
-        )
-
-    # Fallback to CSV
-    output = io.StringIO()
-    writer = csv.writer(output)
-
-    writer.writerow([
-        "Company Name", "Contact Person", "Phone", "Email", 
-        "Address", "Last Education", "Priority", "Status", "Source", "Notes"
-    ])
-
-    for lead in rows:
-        writer.writerow([
-            lead.company_name or "",
-            lead.contact_person or "",
-            lead.phone or "",
-            lead.email or "",
-            lead.address or "",
-            lead.last_education or "",
-            lead.priority or "medium",
-            lead.status or "new",
-            lead.source or "",
-            lead.notes or ""
-        ])
-
-    output.seek(0)
-    return StreamingResponse(
-        io.BytesIO(output.getvalue().encode("utf-8")),
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=leads_export.csv"}
-    )
 
 
 @router.post("/bulk-upload")

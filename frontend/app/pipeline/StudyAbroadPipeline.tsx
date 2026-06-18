@@ -52,6 +52,7 @@ export function StudyAbroadPipeline({
   setSearch,
 }: StudyAbroadPipelineProps) {
   const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [activeStageHover, setActiveStageHover] = useState<string | null>(null);
   const [showNewDeal, setShowNewDeal] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -67,11 +68,16 @@ export function StudyAbroadPipeline({
     setDraggedId(id);
   };
 
-  const handleDragEnd = () => setDraggedId(null);
+  const handleDragEnd = () => {
+    setDraggedId(null);
+    setActiveStageHover(null);
+  };
+  
   const handleDragOver = (e: React.DragEvent) => e.preventDefault();
 
   const handleDrop = async (e: React.DragEvent, stageKey: string) => {
     e.preventDefault();
+    setActiveStageHover(null);
     const id = e.dataTransfer.getData("text/plain");
     if (!id) { setDraggedId(null); return; }
     const opp = opportunities.find(o => o.id === id);
@@ -238,9 +244,26 @@ export function StudyAbroadPipeline({
             return (
               <div
                 key={stage.key}
-                className="glass-card flex min-w-[300px] flex-col rounded-2xl bg-white/25 p-3 dark:bg-slate-900/20 border border-white/20 dark:border-slate-800/50"
+                className={`glass-card flex min-w-[300px] flex-col rounded-2xl p-3 border transition-all duration-200 ${
+                  activeStageHover === stage.key && draggedId !== null
+                    ? "bg-brand-500/5 border-brand-500 shadow-glow-sm scale-[1.01]"
+                    : draggedId !== null
+                    ? "bg-white/10 dark:bg-slate-950/10 border-dashed border-slate-300 dark:border-white/10"
+                    : "bg-white/25 dark:bg-slate-900/20 border-white/20 dark:border-slate-800/50"
+                }`}
                 onDragOver={handleDragOver}
-                onDrop={e => void handleDrop(e, stage.key)}
+                onDragEnter={(e) => {
+                  e.preventDefault();
+                  setActiveStageHover(stage.key);
+                }}
+                onDragLeave={() => {
+                  if (activeStageHover === stage.key) {
+                    setActiveStageHover(null);
+                  }
+                }}
+                onDrop={e => {
+                  void handleDrop(e, stage.key);
+                }}
               >
                 <div className="mb-4 flex items-center justify-between px-1">
                   <div className="flex items-center gap-2">

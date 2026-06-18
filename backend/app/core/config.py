@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     master_encryption_secret: str = ""
 
     allow_anon_dev: bool = False
+    system_org_id: str = "dev-org"
 
     @field_validator("debug", mode="before")
     @classmethod

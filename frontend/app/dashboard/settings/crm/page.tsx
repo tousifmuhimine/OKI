@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Cable, Edit2, GripVertical, Loader2, Plus, Settings2, Shield, Trash2, X, Zap } from "lucide-react";
+import { Cable, Edit2, GripVertical, Loader2, Plus, Settings2, Shield, Trash2, X, Zap, CreditCard } from "lucide-react";
 
 import { ProtectedPage } from "@/components/protected-page";
 import { apiRequest } from "@/lib/api";
@@ -209,7 +209,7 @@ export default function CRMConfigPage() {
   return (
     <ProtectedPage>
       <section className="min-h-[calc(100vh-54px)] bg-transparent px-6 pb-10 pt-6">
-        <div className="mb-6 flex items-center gap-2 border-b border-white/20 dark:border-white/10">
+        <div className="mb-6 flex items-center gap-2 border-b border-white/20 dark:border-white/10 overflow-x-auto whitespace-nowrap scrollbar-none">
           <Link href="/dashboard/settings/channels" className="flex items-center gap-2 px-4 py-3 text-sm font-medium text-slate-600 transition hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200">
             <Cable size={16} />
             Channels
@@ -222,9 +222,13 @@ export default function CRMConfigPage() {
             <Shield size={16} />
             Permissions
           </Link>
-          <Link href="/dashboard/settings/crm" className="flex items-center gap-2 border-b-2 border-brand-500 px-4 py-3 text-sm font-medium text-brand-600 transition dark:text-brand-400">
+          <Link href="/dashboard/settings/crm" className="flex items-center gap-2 px-4 py-3 text-sm font-medium text-slate-600 transition hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200">
             <Settings2 size={16} />
             CRM Configuration
+          </Link>
+          <Link href="/dashboard/settings/billing" className="flex items-center gap-2 px-4 py-3 text-sm font-medium text-slate-600 transition hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200">
+            <CreditCard size={16} />
+            Billing & Plan
           </Link>
         </div>
 

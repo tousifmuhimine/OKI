@@ -398,6 +398,14 @@ async def _maybe_auto_reply(
         # defensive: if attribute access fails, continue
         pass
 
+    # Check if chatbot is enabled for organization
+    if inbox.organization_id:
+        from app.db.models import Organization
+        org = await session.get(Organization, inbox.organization_id)
+        if org and not org.chatbot_enabled:
+            logger.info("[auto-reply] skipped: chatbot is disabled for organization %s", inbox.organization_id)
+            return
+
     # fetch the matching LLM config for this channel, not just the first row
     q = select(UserLLMConfig).where(
         UserLLMConfig.user_id == inbox.workspace_id,

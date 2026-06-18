@@ -36,7 +36,7 @@ import {
 
 import { ProtectedPage } from "@/components/protected-page";
 import { apiRequest } from "@/lib/api";
-import { getSupabaseClient } from "@/lib/supabase";
+import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 import {
   Customer,
   Lead,
@@ -223,6 +223,8 @@ function LeadsContent() {
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [bulkAssignOpen, setBulkAssignOpen] = useState(false);
   const [bulkStageOpen, setBulkStageOpen] = useState(false);
+  const [generalExportOpen, setGeneralExportOpen] = useState(false);
+  const [bulkExportOpen, setBulkExportOpen] = useState(false);
   const [shareLeadId, setShareLeadId] = useState<string | null>(null);
   const [shareMode, setShareMode] = useState<"public" | "restricted">("restricted");
   const [shareEmails, setShareEmails] = useState("");
@@ -382,7 +384,7 @@ function LeadsContent() {
       setSelectedId((current) => current && leadResponse.data.some((lead) => lead.id === current)
         ? current
         : null);
-      setSelectedLeadIds([]);
+      setSelectedLeadIds((current) => current.filter((id) => leadResponse.data.some((lead) => lead.id === id)));
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -941,34 +943,28 @@ function LeadsContent() {
     setBulkSharing(true);
     setBulkShareError(null);
     try {
-      const payload: any = { mode: bulkShareMode };
+      const payload: any = { 
+        lead_ids: selectedLeadIds,
+        mode: bulkShareMode 
+      };
       if (bulkShareMode === "restricted") {
         const emails = bulkShareEmails.split(",").map(em => em.trim()).filter(Boolean);
         if (emails.length === 0) throw new Error("Please enter at least one email address");
         payload.allowed_emails = emails;
       }
       
-      const results: { company: string; url: string }[] = [];
-      for (const id of selectedLeadIds) {
-        const lead = leads.find(l => l.id === id);
-        const companyName = lead?.company_name || lead?.contact_person || id.substring(0, 8);
-        try {
-          const res = await apiRequest<{ share_url: string }>(`/leads/${id}/share-links`, {
-            method: "POST",
-            body: JSON.stringify(payload)
-          });
-          results.push({ company: companyName, url: res.share_url });
-        } catch (err: any) {
-          results.push({ company: companyName, url: `Error: ${err.message}` });
-        }
-      }
-      setBulkShareLinks(results);
+      const res = await apiRequest<{ share_url: string }>("/bulk-share-links", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+      setBulkShareLinks([{ company: "All Selected Leads", url: res.share_url }]);
     } catch (err: any) {
       setBulkShareError(err.message);
     } finally {
       setBulkSharing(false);
     }
   }
+
 
   async function loadLeadDetail(leadId: string) {
     try {
@@ -1060,7 +1056,7 @@ function LeadsContent() {
     return `${host}${relativeUrl}`;
   };
 
-  const handleExport = () => {
+  const handleExport = async (format: "excel" | "csv" = "excel") => {
     const params = new URLSearchParams();
     if (query.trim()) params.set("search", query.trim());
     if (statusFilter !== "all") params.set(configs.stages.some((stage) => stage.id === statusFilter) ? "stage_id" : "status", statusFilter);
@@ -1071,7 +1067,17 @@ function LeadsContent() {
     if (agentFilter !== "all") params.set("assigned_user_id", agentFilter);
     if (startDate) params.set("start_date", apiDate(startDate));
     if (endDate) params.set("end_date", apiDate(endDate, true));
-    params.set("format", "excel");
+    params.set("format", format);
+
+    if (isSupabaseConfigured()) {
+      try {
+        const { data } = await getSupabaseClient().auth.getSession();
+        const token = data.session?.access_token;
+        if (token) params.set("access_token", token);
+      } catch (e) {
+        console.error("Failed to append auth token for export:", e);
+      }
+    }
     
     const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/api/v1";
     window.open(`${baseUrl}/leads/export?${params.toString()}`);
@@ -1474,12 +1480,37 @@ function LeadsContent() {
             <h1 className="mt-1 text-2xl font-bold text-slate-900 dark:text-white">Lead Operations</h1>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={handleExport}
-              className="flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800 px-4 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 sm:h-10"
-            >
-              Export
-            </button>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setGeneralExportOpen(!generalExportOpen)}
+                className="flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800 px-4 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 sm:h-10"
+              >
+                <span>Export</span>
+                <ChevronDown size={14} />
+              </button>
+              {generalExportOpen && (
+                <>
+                  <div className="fixed inset-0 z-[80]" onClick={() => setGeneralExportOpen(false)} />
+                  <div className="absolute right-0 top-full mt-1.5 w-36 rounded-xl border border-slate-100 bg-white p-1 shadow-2xl dark:border-slate-700 dark:bg-slate-800 z-[90] animate-fade-in">
+                    <button
+                      type="button"
+                      onClick={() => { setGeneralExportOpen(false); handleExport("excel"); }}
+                      className="w-full rounded-lg px-3 py-2 text-left text-xs font-bold text-slate-600 hover:bg-brand-500 hover:text-white dark:text-slate-300"
+                    >
+                      Export Excel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setGeneralExportOpen(false); handleExport("csv"); }}
+                      className="w-full rounded-lg px-3 py-2 text-left text-xs font-bold text-slate-600 hover:bg-brand-500 hover:text-white dark:text-slate-300"
+                    >
+                      Export CSV
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
             <label className="flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800 px-4 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer sm:h-10">
               Import Excel/CSV
               <input type="file" accept=".csv, .xlsx, .xls" onChange={handleBulkUpload} className="hidden" />
@@ -2341,11 +2372,12 @@ function LeadsContent() {
                                 : ""
                           }`}
                         >
-                          <td className="px-5 py-4 w-10" onClick={(e) => e.stopPropagation()}>
+                          <td className="px-5 py-4 w-10">
                             <input
                               type="checkbox"
                               checked={isSelected}
                               onChange={() => handleSelectLead(lead.id)}
+                              onClick={(e) => e.stopPropagation()}
                               className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 dark:border-slate-700 dark:bg-slate-800 cursor-pointer"
                             />
                           </td>
@@ -2947,8 +2979,8 @@ function LeadsContent() {
 
       {selectedLeadIds.length > 0 && (
         <>
-          {(bulkAssignOpen || bulkStageOpen) && (
-            <div className="fixed inset-0 z-[80]" onClick={() => { setBulkAssignOpen(false); setBulkStageOpen(false); }} />
+          {(bulkAssignOpen || bulkStageOpen || bulkExportOpen) && (
+            <div className="fixed inset-0 z-[80]" onClick={() => { setBulkAssignOpen(false); setBulkStageOpen(false); setBulkExportOpen(false); }} />
           )}
           <div className="fixed bottom-6 left-1/2 z-[100] flex -translate-x-1/2 items-center gap-4 rounded-2xl border border-white/20 bg-white/95 p-3 shadow-2xl backdrop-blur-2xl dark:border-white/10 dark:bg-slate-900/95 animate-fade-up">
             <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
@@ -3020,20 +3052,67 @@ function LeadsContent() {
                 )}
               </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/api/v1";
-                  const params = new URLSearchParams();
-                  selectedLeadIds.forEach((id) => params.append("lead_ids", id));
-                  params.set("format", "excel");
-                  window.open(`${baseUrl}/leads/export?${params.toString()}`);
-                }}
-                className="flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-              >
-                <FileText size={14} />
-                <span>Export Excel</span>
-              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => { setBulkExportOpen(!bulkExportOpen); setBulkAssignOpen(false); setBulkStageOpen(false); }}
+                  className="flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                >
+                  <FileText size={14} />
+                  <span>Export</span>
+                  <ChevronDown size={12} />
+                </button>
+                {bulkExportOpen && (
+                  <div className="absolute bottom-full right-0 mb-2 w-36 rounded-xl border border-slate-100 bg-white p-1 shadow-2xl dark:border-slate-700 dark:bg-slate-800 z-[90] animate-fade-in">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setBulkExportOpen(false);
+                        const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/api/v1";
+                        const params = new URLSearchParams();
+                        selectedLeadIds.forEach((id) => params.append("lead_ids", id));
+                        params.set("format", "excel");
+                        if (isSupabaseConfigured()) {
+                          try {
+                            const { data } = await getSupabaseClient().auth.getSession();
+                            const token = data.session?.access_token;
+                            if (token) params.set("access_token", token);
+                          } catch (e) {
+                            console.error(e);
+                          }
+                        }
+                        window.open(`${baseUrl}/leads/export?${params.toString()}`);
+                      }}
+                      className="w-full rounded-lg px-3 py-2 text-left text-xs font-bold text-slate-600 hover:bg-brand-500 hover:text-white dark:text-slate-300"
+                    >
+                      Export Excel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setBulkExportOpen(false);
+                        const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/api/v1";
+                        const params = new URLSearchParams();
+                        selectedLeadIds.forEach((id) => params.append("lead_ids", id));
+                        params.set("format", "csv");
+                        if (isSupabaseConfigured()) {
+                          try {
+                            const { data } = await getSupabaseClient().auth.getSession();
+                            const token = data.session?.access_token;
+                            if (token) params.set("access_token", token);
+                          } catch (e) {
+                            console.error(e);
+                          }
+                        }
+                        window.open(`${baseUrl}/leads/export?${params.toString()}`);
+                      }}
+                      className="w-full rounded-lg px-3 py-2 text-left text-xs font-bold text-slate-600 hover:bg-brand-500 hover:text-white dark:text-slate-300"
+                    >
+                      Export CSV
+                    </button>
+                  </div>
+                )}
+              </div>
 
               <button
                 type="button"
@@ -3076,7 +3155,7 @@ function LeadsContent() {
               <div className="space-y-4">
                 <div className="rounded-xl bg-emerald-500/10 p-4 border border-emerald-500/20 text-center">
                   <CheckCircle2 size={24} className="text-emerald-500 mx-auto mb-2" />
-                  <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">Share links generated successfully!</p>
+                  <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">Share link generated successfully!</p>
                 </div>
                 <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
                   {bulkShareLinks.map((link, idx) => (

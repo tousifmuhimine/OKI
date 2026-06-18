@@ -269,9 +269,17 @@ class LeadShareCreate(BaseModel):
     expires_in_days: int | None = Field(default=None, ge=1, le=3650)
 
 
+class LeadBulkShareCreate(BaseModel):
+    lead_ids: list[str]
+    mode: Literal["public", "restricted"] = "public"
+    allowed_emails: list[EmailStr] | None = None
+    expires_in_days: int | None = Field(default=None, ge=1, le=3650)
+
+
 class LeadShareOut(BaseModel):
     id: str
-    lead_id: str
+    lead_id: str | None = None
+    lead_ids: list[str] = []
     token: str
     share_url: str
     is_public: bool
@@ -293,3 +301,11 @@ class PublicLeadOut(BaseModel):
     tags: list[str] | None = None
     notes: str | None = None
     created_at: datetime
+
+
+class PublicShareLinkOut(BaseModel):
+    id: str
+    is_public: bool
+    expires_at: datetime | None = None
+    leads: list[PublicLeadOut]
+

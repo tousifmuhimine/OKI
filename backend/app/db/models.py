@@ -52,6 +52,7 @@ class LeadShareLink(Base, TimestampMixin):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
     lead_id: Mapped[str] = mapped_column(String(36), ForeignKey("leads.id", ondelete="CASCADE"), index=True)
+    lead_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
     created_by_user_id: Mapped[str] = mapped_column(String(36), index=True)
     token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     is_public: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -492,6 +493,23 @@ class Organization(Base, TimestampMixin):
     allow_public_shares: Mapped[bool] = mapped_column(Boolean, default=True)
     default_share_expiry_days: Mapped[int] = mapped_column(Integer, nullable=True)
     organization_type_id: Mapped[str] = mapped_column(String(36), ForeignKey("organization_types.id", ondelete="SET NULL"), nullable=True, index=True)
+    
+    # Billing & Subscription System
+    plan_name: Mapped[str] = mapped_column(String(64), default="free", server_default="free")
+    subscription_status: Mapped[str] = mapped_column(String(64), default="active", server_default="active")
+    subscription_cycle: Mapped[str] = mapped_column(String(64), default="monthly", server_default="monthly")
+    subscription_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    
+    # Feature Flags / Systems
+    chatbot_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    crm_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    lead_bulk_share_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    
+    # Subscription Plan Upgrade Requests
+    requested_plan_name: Mapped[str] = mapped_column(String(64), nullable=True)
+    requested_subscription_cycle: Mapped[str] = mapped_column(String(64), nullable=True)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+
 
 
 class OrganizationType(Base, TimestampMixin):

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Zap, Plus, Trash2, CheckCircle2, AlertCircle, Cable, RefreshCw, Shield } from "lucide-react";
+import { Zap, Plus, Trash2, CheckCircle2, AlertCircle, Cable, RefreshCw, Shield, Settings2, CreditCard } from "lucide-react";
 
 import { ProtectedPage } from "@/components/protected-page";
 import { apiRequest } from "@/lib/api";
@@ -207,7 +207,7 @@ export default function AISettingsPage() {
   return (
     <ProtectedPage>
       <section className="min-h-[calc(100vh-54px)] bg-transparent px-6 pb-10 pt-6">
-        <div className="mb-6 flex items-center gap-2 border-b border-white/20 dark:border-white/10">
+        <div className="mb-6 flex items-center gap-2 border-b border-white/20 dark:border-white/10 overflow-x-auto whitespace-nowrap scrollbar-none">
           <Link
             href="/dashboard/settings/channels"
             className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition ${
@@ -240,6 +240,28 @@ export default function AISettingsPage() {
           >
             <Shield size={16} />
             Permissions
+          </Link>
+          <Link
+            href="/dashboard/settings/crm"
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition ${
+              pathname === "/dashboard/settings/crm"
+                ? "border-b-2 border-brand-500 text-brand-600 dark:text-brand-400"
+                : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200"
+            }`}
+          >
+            <Settings2 size={16} />
+            CRM Configuration
+          </Link>
+          <Link
+            href="/dashboard/settings/billing"
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition ${
+              pathname === "/dashboard/settings/billing"
+                ? "border-b-2 border-brand-500 text-brand-600 dark:text-brand-400"
+                : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200"
+            }`}
+          >
+            <CreditCard size={16} />
+            Billing & Plan
           </Link>
         </div>
 
